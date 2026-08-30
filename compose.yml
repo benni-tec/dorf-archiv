@@ -1,0 +1,11 @@
+# The whole stack on one box — PLAN.md §4.1 shape 2, a legitimate deployment rather than a
+# development convenience. Brought up by `bun run stack:up`.
+#
+# `include:` pulls the backing services in from the file development already uses, so the
+# two definitions cannot drift.
+
+name: dorf-archiv
+
+include:
+  - compose.dev.yml
+  - compose.app.yml

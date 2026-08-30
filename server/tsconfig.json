@@ -1,26 +1,28 @@
 {
-  "extends": "../tsconfig.json",
-  "compilerOptions": {
-    // Environment settings
-    "lib": ["ESNext"],
-    "target": "ESNext",
-    "module": "ESNext",
-    "jsx": "react-jsx",
-    "jsxImportSource": "hono/jsx",
+	"extends": "../tsconfig.json",
+	"compilerOptions": {
+		// Environment settings
+		"lib": ["ESNext"],
+		"target": "ESNext",
+		"module": "ESNext",
+		"jsx": "react-jsx",
+		"jsxImportSource": "hono/jsx",
 
-    // Types
-    "types": ["bun-types"],
+		// Types
+		"types": ["bun-types"],
 
-    // Output settings
-    "declaration": true,
-    "outDir": "dist",
-    "noEmit": false,
-    "emitDecoratorMetadata": true,
+		// Output settings
+		"declaration": true,
+		"outDir": "dist",
+		"noEmit": false,
+		"emitDecoratorMetadata": true,
 
-    // Module resolution
-    "moduleResolution": "bundler",
-    "allowImportingTsExtensions": false
-  },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
+		// Module resolution
+		"moduleResolution": "bundler",
+		"allowImportingTsExtensions": false
+	},
+	"include": ["src/**/*"],
+	// Tests are typechecked by `bun test`, not compiled: `dist/` is what the client resolves
+	// `server/client` to, and test files have no business in that surface.
+	"exclude": ["node_modules", "dist", "src/**/*.test.ts"]
 }

@@ -4,10 +4,9 @@ A community archive for a village's history. Locals contribute photos and storie
 people and places around them, from their phones, and everything lands on an interactive map
 tied to a timeline.
 
-> **Status: early.** The repository is still close to its [bhvr](https://github.com/stevedylandev/bhvr)
-> starter shape — the domain code is not written yet. The design, however, is settled and
-> documented. Commands marked *(planned)* below describe the intended interface and are not
-> wired up yet.
+> **Status: early.** The groundwork is in place — Compose stack, Postgres and MinIO, Drizzle,
+> configuration and a health endpoint end to end — but no domain code is written yet. The
+> design is settled and documented; `PLAN.md` §8 is the order things land in.
 
 ## What it does
 
@@ -52,19 +51,34 @@ Bun workspaces + Turbo, with three packages: `client`, `server`, `shared`.
 Requires [Bun](https://bun.sh) and Docker.
 
 ```bash
-bun install          # also prebuilds shared + server (see note below)
-bun run dev:deps     # (planned) Postgres + MinIO, foreground, torn down on exit
-bun run dev          # client on :5173, server on :3000
+cp .env.example .env   # optional — every value has a working default
+bun install            # also prebuilds shared + server (see note below)
+bun run dev:deps       # Postgres + MinIO, foreground, torn down when you stop it
+bun run dev            # client on :5173, server on :3000
 ```
+
+Then open <http://localhost:5173>, which reports whether the server can reach both.
 
 | Script | Does |
 | --- | --- |
 | `dev` | client and server from source, with hot reload |
 | `dev:client` / `dev:server` | one workspace only |
-| `dev:deps` *(planned)* | dependencies in the foreground, cleaned up when you stop it |
-| `dev:deps:up` / `dev:deps:down` *(planned)* | the same, detached |
+| `dev:deps` | dependencies in the foreground, cleaned up when you stop it |
+| `dev:deps:up` / `dev:deps:down` | the same, detached |
+| `stack:up` / `stack:down` | the whole stack in containers, application included |
+| `db:generate` / `db:migrate` / `db:studio` | Drizzle, run from the host against `DATABASE_URL` |
 | `build` | all workspaces |
+| `test` | `bun test` — the server's suite, then the ones under `scripts/` |
+| `type-check` | `tsc --noEmit` across all three workspaces |
 | `lint` / `format` | Biome — tabs, double quotes |
+
+Configuration is a single `.env` at the repository root, read by both the server and Docker
+Compose so their credentials cannot drift apart. `.env.example` documents every variable; the
+Compose files carry the same values as defaults, so the stack comes up without one.
+
+Teardown never removes volumes — `dev:deps` tears down on exit, and losing the local database
+every time you stop working would be absurd. `bun run dev:deps:down -v` refuses unless you also
+pass `--yes-destroy-data`.
 
 The client and server run **from source**, not in containers; only the backing services come
 from Docker. Their connection strings are environment variables, so in development they simply
@@ -78,7 +92,7 @@ point at localhost.
 
 ## Deployment
 
-*(planned — no deployment target is chosen yet)*
+*(no deployment target is chosen yet)*
 
 Only the application is containerized. Postgres and object storage are always reached through
 connection strings, so three shapes work from the same source:
@@ -86,10 +100,16 @@ connection strings, so three shapes work from the same source:
 1. **Development** — app from source, Compose supplying Postgres and MinIO.
 2. **Compose as production** — the whole stack on one box.
    ```bash
-   docker compose -f docker/compose.yml up -d
+   bun run stack:up
    ```
 3. **App container + external services** — the image on a platform, with the database and
    object storage supplied by whoever runs them.
+   ```bash
+   docker build -f server/Dockerfile -t dorf-archiv .
+   ```
+
+The image carries the Hono API only. Serving the built client from it — which shape 2 will
+want, so that one container answers everything — is not wired up yet.
 
 Configuration is entirely environment variables — database URL, S3 endpoint and credentials,
 auth secret, public URL, operator details for the Impressum. Nothing assumes a particular

@@ -1,0 +1,119 @@
+#!/usr/bin/env bun
+/**
+ * Thin wrapper around `docker compose`, so nobody types paths (PLAN.md §4.1).
+ *
+ * Bun rather than a shell script because it behaves the same on Windows and Linux, which
+ * matters here: this is the one part of the toolchain a contributor hits before anything
+ * else works.
+ *
+ * Usage: bun scripts/compose.ts <deps|full> <...docker compose arguments>
+ */
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+
+export type Stack = "deps" | "full";
+
+const COMPOSE_FILES: Record<Stack, string> = {
+	/** Backing services only — what development runs against source on the host. */
+	deps: "compose.dev.yml",
+	/** The whole stack, application included. */
+	full: "compose.yml",
+};
+
+export const REPO_ROOT = resolve(import.meta.dir, "..");
+
+/**
+ * The flag that has to be typed alongside `-v` to actually remove volumes. It is stripped
+ * before docker sees it.
+ */
+const DESTROY_ACKNOWLEDGEMENT = "--yes-destroy-data";
+
+export class DestructiveComposeError extends Error {
+	constructor() {
+		super(
+			`Refusing to remove volumes: that deletes the local Postgres data and the MinIO bucket.\n` +
+				`Teardown is \`down\` without \`-v\`. If you really mean it, add ${DESTROY_ACKNOWLEDGEMENT}.`,
+		);
+		this.name = "DestructiveComposeError";
+	}
+}
+
+/**
+ * Guards the one Compose invocation that destroys work: `down -v`.
+ *
+ * PLAN.md §4.1 makes this an invariant rather than a habit — volumes are named and must
+ * survive teardown, because `dev:deps` tears the stack down every time you stop it.
+ *
+ * @returns the arguments with the acknowledgement flag removed.
+ * @throws {DestructiveComposeError} if volumes would be removed without acknowledgement.
+ */
+export function assertNonDestructive(args: string[]): string[] {
+	const acknowledged = args.includes(DESTROY_ACKNOWLEDGEMENT);
+	const remaining = args.filter((arg) => arg !== DESTROY_ACKNOWLEDGEMENT);
+
+	const removesVolumes =
+		remaining[0] === "down" &&
+		remaining.some((arg) => arg === "-v" || arg === "--volumes");
+
+	if (removesVolumes && !acknowledged) throw new DestructiveComposeError();
+
+	return remaining;
+}
+
+/**
+ * Builds the `docker` argument list for a stack.
+ *
+ * The compose file's directory becomes Compose's project directory, which is what makes the
+ * relative build contexts resolve. The env file is passed only when one
+ * exists — every variable has a development default, so a missing `.env` is not an error.
+ */
+export function buildComposeArgs(
+	stack: Stack,
+	args: string[],
+	options: { envFile: string | null },
+): string[] {
+	const composeArgs = ["compose", "--file", COMPOSE_FILES[stack]];
+
+	if (options.envFile) composeArgs.push("--env-file", options.envFile);
+
+	return [...composeArgs, ...args];
+}
+
+/** The repository-root `.env`, or null when there isn't one. */
+export function findEnvFile(): string | null {
+	const candidate = resolve(REPO_ROOT, ".env");
+	return existsSync(candidate) ? candidate : null;
+}
+
+/** Spawns `docker` with the given compose arguments, inheriting the terminal. */
+export function spawnCompose(stack: Stack, args: string[]) {
+	return Bun.spawn(
+		["docker", ...buildComposeArgs(stack, args, { envFile: findEnvFile() })],
+		{ cwd: REPO_ROOT, stdio: ["inherit", "inherit", "inherit"] },
+	);
+}
+
+function isStack(value: string | undefined): value is Stack {
+	return value === "deps" || value === "full";
+}
+
+if (import.meta.main) {
+	const [stack, ...rest] = Bun.argv.slice(2);
+
+	if (!isStack(stack)) {
+		console.error(
+			"Usage: bun scripts/compose.ts <deps|full> <...compose arguments>",
+		);
+		process.exit(2);
+	}
+
+	try {
+		const child = spawnCompose(stack, assertNonDestructive(rest));
+		process.exit(await child.exited);
+	} catch (error) {
+		console.error(
+			error instanceof DestructiveComposeError ? error.message : error,
+		);
+		process.exit(1);
+	}
+}

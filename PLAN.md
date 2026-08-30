@@ -643,7 +643,7 @@ Bun workspaces + Turbo, as today. Responsibilities:
 | `shared/` | Cross-boundary types; the **content module** (below); rough-date construction, validation and formatting; permission definitions |
 | `server/` | Hono API, domain layer, Drizzle schema + migrations, auth, moderation, search, translation, image derivatives, S3 access |
 | `client/` | Vite + React 19 SPA — TanStack Router/Query, Tailwind v4, shadcn/ui, MapLibre, TipTap |
-| `docker/` | Compose stack, custom Postgres image, MinIO |
+| repo root | Compose files (`compose.dev.yml`, `compose.app.yml`, `compose.yml`); `postgres/` holds the custom Postgres image, `server/Dockerfile` the app image |
 
 **The content module is one module, not a parser and a serializer.** The mdast AST is the
 canonical representation; directive-Markdown and TipTap's document are both *projections*
@@ -707,9 +707,9 @@ can reasonably satisfy it:
 
 **Two separate Compose files, no profiles.**
 
-- `docker/compose.dev.yml` — Postgres, MinIO, bucket initialisation. Standalone and
+- `compose.dev.yml` — Postgres, MinIO, bucket initialisation. Standalone and
   self-sufficient; this is what development runs.
-- `docker/compose.yml` — the full stack. Pulls the dependencies in with Compose's
+- `compose.yml` — the full stack. Pulls the dependencies in with Compose's
   `include:` rather than restating them, so the two files can't drift. (If the installed
   Compose predates `include:`, the equivalent is `-f compose.dev.yml -f compose.app.yml`.)
 

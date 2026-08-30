@@ -11,23 +11,39 @@ bun install            # also runs postinstall: turbo build --filter=shared --fi
 bun run dev            # all workspaces (client on :5173, server on :3000)
 bun run dev:client
 bun run dev:server
+bun run dev:deps       # Postgres + MinIO, foreground, torn down when you stop it
+bun run dev:deps:up    # the same, detached — dev:deps:down to stop
+bun run stack:up       # whole stack in containers (app included); stack:down to stop
+bun run db:generate    # drizzle-kit generate / migrate / studio, run from the host
 bun run build          # or build:client / build:server
 bun run lint           # biome lint .
 bun run format         # biome format . --write
 bun run type-check     # turbo type-check
-bun run test           # turbo test
+bun run test           # turbo test, then bun test scripts
 ```
 
-Note: no workspace currently defines a `type-check` or `test` script, so those root commands are no-ops until one is added. There is no test framework wired up; `bun test` is the natural fit for this stack.
+Tests are **`bun test`**, colocated as `*.test.ts` beside the code. `server/tsconfig.json` excludes them from the build — `dist/` is what the client resolves `server/client` to, so test files must not reach it. `scripts/` is not a workspace, which is why the root `test` script runs it separately.
 
-Formatting/linting is Biome, not ESLint/Prettier: **tabs** for indentation, **double quotes**, import organization enabled as an assist action.
+Formatting/linting is Biome, not ESLint/Prettier: **tabs** for indentation, **double quotes**, import organization enabled as an assist action. Parts of the repo predating this were never formatted, so run Biome on the files you touch rather than the whole tree.
+
+### Configuration
+
+**One `.env`, at the repository root**, read by both the server and Docker Compose so their credentials cannot drift apart. `.env.example` documents every variable.
+
+Bun does **not** walk up from the working directory to find `.env`, and Turbo runs each script with the workspace as its cwd — so the server's scripts pass `--env-file=../.env` explicitly. Bun tolerates that file being absent, which is deliberate: every variable has a working default baked into the Compose files.
+
+`server/src/config/env.ts` is the only place environment variables are *interpreted*. Exactly two callers hand it `process.env` — the composition root and `drizzle.config.ts` — and nothing else reads it at all. Everything downstream takes a `ServerEnv`, which is what stops a silent `process.env.FOO ?? "default"` appearing mid-domain later. It reports every bad variable at once and never echoes a value, since half of them are credentials.
+
+The client is the exception that needs saying: Vite looks for `.env` in `envDir`, which defaults to the workspace, so `client/vite.config.ts` sets `envDir: ".."` to reach the same root file. Only `VITE_`-prefixed variables are exposed to the bundle.
 
 ## Architecture
 
 Bun workspace monorepo (`client`, `server`, `shared`) derived from the [bhvr](https://github.com/stevedylandev/bhvr) template. The defining property is end-to-end type safety across the client/server boundary, achieved in two layers:
 
-1. **`shared`** — plain runtime-agnostic types (`ApiResponse`, etc.) imported as `import type { X } from "shared"` by both sides. Add anything used by client *and* server here and re-export it from `shared/src/index.ts`.
-2. **Hono RPC** — `server/src/index.ts` exports the `app` const built as a *single chained expression* (`new Hono().use(...).get(...)`). That chaining is load-bearing: Hono derives the `AppType` from it, and splitting routes into separate `app.get(...)` statements silently erases the route types from the client. `server/src/client.ts` re-exports `hcWithType`, and the client calls typed endpoints via `client.hello.$get()` — request/response shapes flow from the route handler with no manual duplication.
+1. **`shared`** — plain runtime-agnostic types imported as `import type { X } from "shared"` by both sides. Add anything the client and server both *construct* here and re-export it from `shared/src/index.ts`. Response shapes do not belong here: they are inferred through RPC.
+2. **Hono RPC** — `server/src/app.ts` exports `createApp(dependencies)`, which builds the app as a *single chained expression* (`new Hono().use(...).route(...)`), and `App = ReturnType<typeof createApp>`. That chaining is load-bearing: Hono derives the type from it, and splitting routes into separate `app.get(...)` statements silently erases the route types from the client. `server/src/client.ts` re-exports `hcWithType`, and the client calls typed endpoints via `client.health.$get()` — request/response shapes flow from the route handler with no manual duplication.
+
+**`server/src/index.ts` is the composition root and nothing else** — the only place that reads the environment, opens a connection or registers a shutdown handler. It builds the one app instance the process serves and exports `{ port, fetch }`. `client.ts` takes its type from `./app`, never from `./index`, so importing the RPC type never drags connection setup along. Tests drive the real routes by calling `createApp` with stub dependencies, which is why none of them need a database.
 
 **Build ordering matters.** The client imports `server/client`, which resolves to `server/dist/client.d.ts` (compiled output), not source. So `shared` and `server` must be built before the client typechecks — this is why `postinstall` pre-builds them, why `turbo.json` tasks declare `dependsOn: ["^build"]`, and why `server`'s dev script runs `bun --watch run src/index.ts & tsc --watch` (the `tsc --watch` half exists only to keep `dist/` fresh for the client). If the client reports missing routes or stale response types, rebuild the server.
 
@@ -53,7 +69,9 @@ Root config sets `noUncheckedIndexedAccess` and `verbatimModuleSyntax` (type-onl
 
 ## Current state and direction
 
-The repo is still the bhvr starter with TanStack Router/Query, Tailwind v4 and shadcn layered on; no domain code has been written yet. `README.md` now describes this project rather than the template, and marks not-yet-wired commands as *(planned)* — keep those markers accurate as things land.
+**`PLAN.md` §8 step 1 (groundwork) is done; step 2 (the domain core) is next.** What exists: the Compose stack, validated configuration, a Drizzle connection with an empty schema, an S3 client, and `GET /health` reaching both dependencies end to end. What does not: any table, any entity, any authorization. `server/src/db/schema/index.ts` is empty on purpose and records the conventions the first tables inherit.
+
+Keep `README.md` honest as things land — it currently states one known gap, that the application image serves the API only and not the built client.
 
 **`PLAN.md` is the source of truth for where this is going.** Read it before starting feature work. In short: a community village archive where locals upload photos and stories from their phones, centred on a map tied to a timeline, with historic map overlays and an ancestry view. The stack decisions in it are settled; product details are firming up, and open items are marked `(?)` — don't silently resolve one by implementing it.
 
@@ -77,7 +95,20 @@ Stated requirements are allowed where any host can meet them — **Postgres ≥ 
 
 - **German full-text search is quality-degradable, not all-or-nothing.** A Hunspell `de_DE` dictionary gives compound splitting; without it Postgres does stemming only and *Kirche* never matches *Dorfkirche*, which on a German corpus is most searches. Installing one needs filesystem access to `$SHAREDIR/tsearch_data/`, which many hosts don't allow — so **the text-search configuration name is a setting**, not a constant. Full quality where the dictionary exists, graceful fallback to stock `german` where it doesn't. Never hard-code it.
 - **Image processing stays client-side on the upload path** (bandwidth, and the crop/deskew UI needs the bitmap anyway), but server-side is available for derivatives and batch work. EXIF is stripped server-side on ingest regardless — a contributor photographing a print at home embeds their house's GPS.
-- **The object bucket is private.** Files reach browsers only via short-lived presigned URLs issued after a permission check; unpublished blobs are in storage from upload, so a public policy or guessable key bypasses moderation.
+- **The object bucket is private.** Files reach browsers only via short-lived presigned URLs issued after a permission check; unpublished blobs are in storage from upload, so a public policy or guessable key bypasses moderation. `compose.dev.yml`'s bucket-init step sets `mc anonymous set none` for exactly this reason — don't relax it to make a URL work in development.
+
+### The Compose stack
+
+`compose.dev.yml` is standalone and self-sufficient — the backing services development runs against. `compose.yml` pulls it in with `include:` alongside `compose.app.yml` rather than restating anything, so the two cannot drift. All three declare `name: dorf-archiv`, so the dev dependencies and the full stack address the *same* volumes; that is intended, and it means `stack:up` sees the database `dev:deps` was using.
+
+Four things here cost an afternoon each if rediscovered:
+
+- **Teardown is `down`, never `down -v`.** Volumes are named and must survive being stopped, since `dev:deps` tears down every time you stop it. `scripts/compose.ts` refuses `-v` without `--yes-destroy-data`; don't route around it.
+- **`postgres:18` moved `PGDATA`** to `/var/lib/postgresql/<major>/docker`. The volume therefore mounts at `/var/lib/postgresql`, not `.../data` — the old path leaves the database in the container's writable layer, where it vanishes on recreate.
+- **`postgres/` exists to make development match a *good* production**, carrying the Hunspell `de_DE` dictionary and registering `german_hunspell`. The init script applies it to `template1` as well as the initial database, so databases created later inherit it. Deployment does not require any of this — `TEXT_SEARCH_CONFIG` selects stock `german` where the dictionary is absent.
+- **Migrations run from the host** via `bun run db:migrate`, never from inside a container and never on boot.
+
+Bun rather than shell for the wrapper scripts, because they behave identically on Windows and Linux — and this is the first thing a contributor touches. `dev:deps` runs Compose in the foreground and owns the signal handling itself: plain `docker compose up` leaves containers lying around, and appending `; docker compose down` does not survive an interrupt on Windows.
 
 ## Backend structure
 
@@ -102,7 +133,7 @@ Stated requirements are allowed where any host can meet them — **Postgres ≥ 
 
 Three load-bearing rules, detailed in `PLAN.md` §2:
 
-- **`Entity` → `VersionedEntity` → `LocalizedEntity` → `HistoricEntity` → subtypes**, each layer adding one capability (identity+audit, versions, languages, archival apparatus). `User` and `Thread` descend from `Entity` directly — identity and audit, no versions. Discussion is threads-of-comments, not a flat list; comments are rows under a thread, moderated individually, ordered by their UUIDv7 id. The discriminator lives on the entity table only. **The spine is one physical table**: `version` and `original_language` are nullable columns on `entity`, null for `User` and `Comment`; table-per-type applies to the subtypes and their content companions, not to the layers (`PLAN.md` §5.2). Each subtype is a **pair**: `place` for what doesn't vary by language, `place_content` for what does (one row per language). There is no shared `LocalizedContent` table — types need different translatable fields — but every `<type>_content` carries `name` and `abstract` by convention, enforced by a registry test.
+- **`Entity` → `VersionedEntity` → `LocalizedEntity` → `HistoricEntity` → subtypes**, each layer adding one capability (identity+audit, versions, languages, archival apparatus). `User`, `Thread` and `Comment` descend from `Entity` directly — identity and audit, no versions. Discussion is threads-of-comments, not a flat list: the thread carries `on_version` (the state of the record it's *about*), comments are moderated individually, and they order by their UUIDv7 id. The discriminator lives on the entity table only. **The spine is one physical table**: `version` and `original_language` are nullable columns on `entity`, null for `User` and `Comment`; table-per-type applies to the subtypes and their content companions, not to the layers (`PLAN.md` §5.2). Each subtype is a **pair**: `place` for what doesn't vary by language, `place_content` for what does (one row per language). There is no shared `LocalizedContent` table — types need different translatable fields — but every `<type>_content` carries `name` and `abstract` by convention, enforced by a registry test.
 - **Proposals share the content tables with published rows**, distinguished by a nullable `proposal_id`. Versions are per-entity integers created at publish, never at proposal time. *A query that forgets `proposal_id IS NULL` returns proposals to the public* — i.e. publishes unmoderated content. Base tables are read only inside the repository, and the row→domain mapper asserts `proposal_id` is null rather than quietly dropping it.
 - **Published content may only reference published content.** One invariant covering tags, links, places and sources alike.
 - **The site is one index per entity type, not a map plus extras.** The map *is* the Places index; ancestry *is* the People index. Detail pages are uniform across types. See `PLAN.md` §6.

@@ -1,0 +1,2 @@
+Generated migrations live here (`bun run db:generate`). Empty until the schema has tables —
+that is PLAN.md §8 step 2.

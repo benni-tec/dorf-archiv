@@ -1,0 +1,33 @@
+# The application service. Never used on its own — `compose.yml` combines it with the
+# backing services from `compose.dev.yml` to make PLAN.md §4.1 shape 2, the whole stack on
+# one box. Deployment shape 3 uses this image with externally-provided services instead, so
+# nothing here may assume the neighbours exist.
+
+name: dorf-archiv
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    image: dorf-archiv/app:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://${POSTGRES_USER:-dorf}:${POSTGRES_PASSWORD:-dorf}@postgres:5432/${POSTGRES_DB:-dorf_archiv}
+      # The bundled Postgres image carries the Hunspell dictionary, so this deployment gets
+      # full-quality German search. On a host without it, drop this and search degrades to
+      # stemming only (PLAN.md §4.3).
+      TEXT_SEARCH_CONFIG: ${TEXT_SEARCH_CONFIG:-german_hunspell}
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: ${S3_BUCKET:-dorf-archiv}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-dorf}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-dorf-dev-secret}
+      S3_FORCE_PATH_STYLE: "true"
+    ports:
+      - "${APP_BIND_ADDRESS:-0.0.0.0}:${APP_PORT:-3000}:3000"
