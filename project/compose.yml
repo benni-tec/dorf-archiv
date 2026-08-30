@@ -7,5 +7,5 @@
 name: dorf-archiv
 
 include:
-  - compose.dev.yml
   - compose.app.yml
+  - compose.infra.yml

@@ -16,7 +16,7 @@
         "typescript": "^5.8.3",
       },
     },
-    "client": {
+    "project/client": {
       "name": "client",
       "version": "0.0.1",
       "dependencies": {
@@ -47,7 +47,7 @@
         "vite": "^6.4.1",
       },
     },
-    "server": {
+    "project/server": {
       "name": "server",
       "version": "0.0.1",
       "dependencies": {
@@ -63,7 +63,7 @@
         "drizzle-kit": "^0.31.10",
       },
     },
-    "shared": {
+    "project/shared": {
       "name": "shared",
       "version": "0.0.1",
       "devDependencies": {
@@ -386,7 +386,7 @@
 
     "class-variance-authority": ["class-variance-authority@0.7.1", "", { "dependencies": { "clsx": "^2.1.1" } }, "sha512-Ka+9Trutv7G8M6WT6SeiRWz792K5qEqIGEGzXKhAE6xOWAY6pPH8U+9IY3oCMv6kqTmLsv7Xh/2w2RigkePMsg=="],
 
-    "client": ["client@workspace:client"],
+    "client": ["client@workspace:project/client"],
 
     "clsx": ["clsx@2.1.1", "", {}, "sha512-eYm0QWBtUrBWZWG0d386OGAw16Z995PiOVo2B7bjWSbHedGl5e0ZWaq65kOGgUSNesEIDkB9ISbTg/JK9dhCZA=="],
 
@@ -508,9 +508,9 @@
 
     "seroval-plugins": ["seroval-plugins@1.6.4", "", { "peerDependencies": { "seroval": "^1.0" } }, "sha512-R0f1U9hmn38+dFMz6b6ab8lwucmw4AtiY7St+JPWudy1dm+Bs3g884nyrsH9Cy6rKpZKLYayXuMda9GZ/fl8JQ=="],
 
-    "server": ["server@workspace:server"],
+    "server": ["server@workspace:project/server"],
 
-    "shared": ["shared@workspace:shared"],
+    "shared": ["shared@workspace:project/shared"],
 
     "source-map": ["source-map@0.6.1", "", {}, "sha512-UjgapumWlbMhkBgzT7Ykc5YXUT46F0iKu8SGXq0bcwP5dz/h0Plj6enJqjz1Zbq2l5WaqYnrVbwWOWMyF3F47g=="],
 

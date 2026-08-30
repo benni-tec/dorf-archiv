@@ -6,9 +6,9 @@
 	"license": "MIT",
 	"packageManager": "bun@1.2.4",
 	"workspaces": [
-		"./server",
-		"./client",
-		"./shared"
+		"./project/server",
+		"./project/client",
+		"./project/shared"
 	],
 	"scripts": {
 		"dev": "turbo dev",

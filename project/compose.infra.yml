@@ -11,7 +11,7 @@ name: dorf-archiv
 services:
   postgres:
     build:
-      context: ./postgres
+      context: postgres
     image: dorf-archiv/postgres:18-hunspell
     restart: unless-stopped
     environment:

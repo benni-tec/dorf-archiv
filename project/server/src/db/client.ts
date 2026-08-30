@@ -10,7 +10,7 @@ import { assertSupportedPostgres } from "./version";
  * Postgres is reached through a connection string and nothing else (PLAN.md §4.1) — no
  * provider SDK, no assumption about who operates it or which extensions are installed
  * beyond the stated Postgres 18 floor. In development the string points at the container
- * `compose.dev.yml` starts; in deployment it points wherever the operator says.
+ * `project/compose.infra.yml` starts; in deployment it points wherever the operator says.
  */
 
 export type Database = ReturnType<typeof drizzle<typeof schema>>;

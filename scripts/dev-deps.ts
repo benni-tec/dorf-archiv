@@ -13,7 +13,7 @@
  */
 import { spawnCompose } from "./compose";
 
-const child = spawnCompose("deps", ["up"]);
+const child = await spawnCompose("deps", ["up"]);
 
 let interrupts = 0;
 
@@ -39,7 +39,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 const upExitCode = await child.exited;
 
 console.log("\nTearing down dependencies (named volumes are kept)…");
-const down = spawnCompose("deps", ["down"]);
+const down = await spawnCompose("deps", ["down"]);
 const downExitCode = await down.exited;
 
 process.exit(upExitCode || downExitCode);

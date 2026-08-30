@@ -3,5 +3,5 @@
 # These are read by Linux containers and break on CRLF, whatever the checkout platform.
 *.sh              text eol=lf
 Dockerfile        text eol=lf
-postgres/**       text eol=lf
-server/Dockerfile text eol=lf
+project/postgres/**       text eol=lf
+project/server/Dockerfile text eol=lf

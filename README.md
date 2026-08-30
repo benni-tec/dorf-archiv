@@ -39,7 +39,19 @@ tied to a timeline.
 
 ## Stack
 
-Bun workspaces + Turbo, with three packages: `client`, `server`, `shared`.
+Bun workspaces + Turbo. The three packages live under `project/`, alongside the Compose
+files and the images the stack builds:
+
+```
+project/
+  client/              the SPA, plus its nginx image
+  server/              the Hono API, plus its image
+  shared/              cross-boundary types
+  postgres/            Postgres 18 carrying the Hunspell dictionary
+  compose.infra.yml    backing services — what development runs against
+  compose.app.yml      the app and client services
+  compose.yml          both of the above, via `include:`
+```
 
 - **Server** — Hono, Drizzle, Postgres, S3-compatible object storage, better-auth
 - **Client** — Vite, React 19, TanStack Router + Query, Tailwind v4, shadcn/ui, MapLibre GL JS,
@@ -48,7 +60,8 @@ Bun workspaces + Turbo, with three packages: `client`, `server`, `shared`.
 
 ## Development
 
-Requires [Bun](https://bun.sh) and Docker.
+Requires [Bun](https://bun.sh) and Docker. Bun is assumed rather than merely supported —
+the repository scripts under `scripts/` are written against Bun's own APIs, not Node's.
 
 ```bash
 cp .env.example .env   # optional — every value has a working default
@@ -105,11 +118,14 @@ connection strings, so three shapes work from the same source:
 3. **App container + external services** — the image on a platform, with the database and
    object storage supplied by whoever runs them.
    ```bash
-   docker build -f server/Dockerfile -t dorf-archiv .
+   docker build -f project/server/Dockerfile -t dorf-archiv .          # the API
+   docker build -f project/client/Dockerfile -t dorf-archiv-client .   # the SPA, on nginx
    ```
 
-The image carries the Hono API only. Serving the built client from it — which shape 2 will
-want, so that one container answers everything — is not wired up yet.
+The client is its own image: the built bundle served by nginx, with the SPA history
+fallback. The API's URL is baked in at build time, because Vite substitutes `import.meta.env`
+during the build — so `VITE_SERVER_URL` is a **build argument**. Pointing the stack at a real
+hostname means rebuilding that image, not setting a variable on the running container.
 
 Configuration is entirely environment variables — database URL, S3 endpoint and credentials,
 auth secret, public URL, operator details for the Impressum. Nothing assumes a particular

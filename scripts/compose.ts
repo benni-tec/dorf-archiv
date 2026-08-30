@@ -4,23 +4,23 @@
  *
  * Bun rather than a shell script because it behaves the same on Windows and Linux, which
  * matters here: this is the one part of the toolchain a contributor hits before anything
- * else works.
+ * else works. Bun is a hard requirement for the repository, so this uses Bun's own APIs
+ * rather than the Node compatibility layer.
  *
  * Usage: bun scripts/compose.ts <deps|full> <...docker compose arguments>
  */
-import { existsSync } from "node:fs";
-import { resolve } from "node:path";
 
 export type Stack = "deps" | "full";
 
 const COMPOSE_FILES: Record<Stack, string> = {
 	/** Backing services only — what development runs against source on the host. */
-	deps: "compose.dev.yml",
-	/** The whole stack, application included. */
-	full: "compose.yml",
+	deps: "project/compose.infra.yml",
+	/** The whole stack, application and client included. */
+	full: "project/compose.yml",
 };
 
-export const REPO_ROOT = resolve(import.meta.dir, "..");
+/** This file lives in `scripts/`, so the repository root is one level up. */
+export const REPO_ROOT = Bun.fileURLToPath(new URL("..", import.meta.url));
 
 /**
  * The flag that has to be typed alongside `-v` to actually remove volumes. It is stripped
@@ -64,8 +64,8 @@ export function assertNonDestructive(args: string[]): string[] {
  * Builds the `docker` argument list for a stack.
  *
  * The compose file's directory becomes Compose's project directory, which is what makes the
- * relative build contexts resolve. The env file is passed only when one
- * exists — every variable has a development default, so a missing `.env` is not an error.
+ * relative build contexts resolve. The env file is passed only when one exists — every
+ * variable has a development default, so a missing `.env` is not an error.
  */
 export function buildComposeArgs(
 	stack: Stack,
@@ -79,16 +79,24 @@ export function buildComposeArgs(
 	return [...composeArgs, ...args];
 }
 
-/** The repository-root `.env`, or null when there isn't one. */
-export function findEnvFile(): string | null {
-	const candidate = resolve(REPO_ROOT, ".env");
-	return existsSync(candidate) ? candidate : null;
+/**
+ * The repository-root `.env`, or null when there isn't one.
+ *
+ * Passing it explicitly matters: the compose files live under `project/`, so Compose would
+ * otherwise look for a `.env` beside them and quietly find nothing.
+ */
+export async function findEnvFile(): Promise<string | null> {
+	const candidate = Bun.fileURLToPath(new URL("../.env", import.meta.url));
+	return (await Bun.file(candidate).exists()) ? candidate : null;
 }
 
 /** Spawns `docker` with the given compose arguments, inheriting the terminal. */
-export function spawnCompose(stack: Stack, args: string[]) {
+export async function spawnCompose(stack: Stack, args: string[]) {
 	return Bun.spawn(
-		["docker", ...buildComposeArgs(stack, args, { envFile: findEnvFile() })],
+		[
+			"docker",
+			...buildComposeArgs(stack, args, { envFile: await findEnvFile() }),
+		],
 		{ cwd: REPO_ROOT, stdio: ["inherit", "inherit", "inherit"] },
 	);
 }
@@ -108,7 +116,7 @@ if (import.meta.main) {
 	}
 
 	try {
-		const child = spawnCompose(stack, assertNonDestructive(rest));
+		const child = await spawnCompose(stack, assertNonDestructive(rest));
 		process.exit(await child.exited);
 	} catch (error) {
 		console.error(

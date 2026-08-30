@@ -1,0 +1,25 @@
+# Build contexts are the repository root (see project/*/Dockerfile), so without this every
+# image build ships the host's node_modules and stale dist output into the context — slow,
+# and worse, `COPY project/server project/server` would then drop a host-built
+# `node_modules` on top of the one the image just installed.
+
+node_modules
+**/node_modules
+
+dist
+**/dist
+build
+**/build
+
+.turbo
+**/.turbo
+*.tsbuildinfo
+
+.git
+.idea
+.vscode
+
+# Never bake local credentials into an image.
+.env
+.env.*
+!.env.example

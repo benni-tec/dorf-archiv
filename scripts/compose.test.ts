@@ -12,7 +12,7 @@ describe("buildComposeArgs", () => {
 		expect(args).toEqual([
 			"compose",
 			"--file",
-			"compose.dev.yml",
+			"project/compose.infra.yml",
 			"up",
 			"-d",
 		]);
@@ -21,7 +21,7 @@ describe("buildComposeArgs", () => {
 	test("targets the full stack file for the full stack", () => {
 		const args = buildComposeArgs("full", ["down"], { envFile: null });
 
-		expect(args).toContain("compose.yml");
+		expect(args).toContain("project/compose.yml");
 	});
 
 	test("passes an env file through when there is one", () => {
@@ -39,7 +39,7 @@ describe("buildComposeArgs", () => {
 	test("keeps the compose file ahead of the subcommand", () => {
 		const args = buildComposeArgs("deps", ["up"], { envFile: "/repo/.env" });
 
-		expect(args.indexOf("compose.dev.yml")).toBeLessThan(
+		expect(args.indexOf("project/compose.infra.yml")).toBeLessThan(
 			args.indexOf("up"),
 		);
 	});

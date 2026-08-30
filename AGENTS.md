@@ -95,11 +95,13 @@ Stated requirements are allowed where any host can meet them — **Postgres ≥ 
 
 - **German full-text search is quality-degradable, not all-or-nothing.** A Hunspell `de_DE` dictionary gives compound splitting; without it Postgres does stemming only and *Kirche* never matches *Dorfkirche*, which on a German corpus is most searches. Installing one needs filesystem access to `$SHAREDIR/tsearch_data/`, which many hosts don't allow — so **the text-search configuration name is a setting**, not a constant. Full quality where the dictionary exists, graceful fallback to stock `german` where it doesn't. Never hard-code it.
 - **Image processing stays client-side on the upload path** (bandwidth, and the crop/deskew UI needs the bitmap anyway), but server-side is available for derivatives and batch work. EXIF is stripped server-side on ingest regardless — a contributor photographing a print at home embeds their house's GPS.
-- **The object bucket is private.** Files reach browsers only via short-lived presigned URLs issued after a permission check; unpublished blobs are in storage from upload, so a public policy or guessable key bypasses moderation. `compose.dev.yml`'s bucket-init step sets `mc anonymous set none` for exactly this reason — don't relax it to make a URL work in development.
+- **The object bucket is private.** Files reach browsers only via short-lived presigned URLs issued after a permission check; unpublished blobs are in storage from upload, so a public policy or guessable key bypasses moderation. `project/compose.infra.yml`'s bucket-init step sets `mc anonymous set none` for exactly this reason — don't relax it to make a URL work in development.
 
 ### The Compose stack
 
-`compose.dev.yml` is standalone and self-sufficient — the backing services development runs against. `compose.yml` pulls it in with `include:` alongside `compose.app.yml` rather than restating anything, so the two cannot drift. All three declare `name: dorf-archiv`, so the dev dependencies and the full stack address the *same* volumes; that is intended, and it means `stack:up` sees the database `dev:deps` was using.
+Everything the running stack is built from lives under `project/`: the three workspaces, the `postgres/` image, a `Dockerfile` inside each workspace that ships one, and the Compose files. The repository root keeps only what is genuinely repository-wide — Turbo, Biome, the root `tsconfig.json`, the docs, and `scripts/`.
+
+`project/compose.infra.yml` is standalone and self-sufficient — the backing services development runs against. `project/compose.yml` pulls it in with `include:` alongside `compose.app.yml` rather than restating anything, so the two cannot drift. All three declare `name: dorf-archiv`, so the dev dependencies and the full stack address the *same* volumes; that is intended, and it means `stack:up` sees the database `dev:deps` was using.
 
 Four things here cost an afternoon each if rediscovered:
 
@@ -108,7 +110,7 @@ Four things here cost an afternoon each if rediscovered:
 - **`postgres/` exists to make development match a *good* production**, carrying the Hunspell `de_DE` dictionary and registering `german_hunspell`. The init script applies it to `template1` as well as the initial database, so databases created later inherit it. Deployment does not require any of this — `TEXT_SEARCH_CONFIG` selects stock `german` where the dictionary is absent.
 - **Migrations run from the host** via `bun run db:migrate`, never from inside a container and never on boot.
 
-Bun rather than shell for the wrapper scripts, because they behave identically on Windows and Linux — and this is the first thing a contributor touches. `dev:deps` runs Compose in the foreground and owns the signal handling itself: plain `docker compose up` leaves containers lying around, and appending `; docker compose down` does not survive an interrupt on Windows.
+Bun rather than shell for the wrapper scripts, because they behave identically on Windows and Linux — and this is the first thing a contributor touches. Bun is a hard requirement, so they use Bun's own APIs (`Bun.file`, `Bun.spawn`, `Bun.fileURLToPath`) rather than the `node:` compatibility layer; keep new scripts that way. `dev:deps` runs Compose in the foreground and owns the signal handling itself: plain `docker compose up` leaves containers lying around, and appending `; docker compose down` does not survive an interrupt on Windows.
 
 ## Backend structure
 

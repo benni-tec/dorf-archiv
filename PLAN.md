@@ -643,7 +643,7 @@ Bun workspaces + Turbo, as today. Responsibilities:
 | `shared/` | Cross-boundary types; the **content module** (below); rough-date construction, validation and formatting; permission definitions |
 | `server/` | Hono API, domain layer, Drizzle schema + migrations, auth, moderation, search, translation, image derivatives, S3 access |
 | `client/` | Vite + React 19 SPA — TanStack Router/Query, Tailwind v4, shadcn/ui, MapLibre, TipTap |
-| repo root | Compose files (`compose.dev.yml`, `compose.app.yml`, `compose.yml`); `postgres/` holds the custom Postgres image, `server/Dockerfile` the app image |
+| `project/` | Contains the three workspaces above, the Compose files (`compose.infra.yml`, `compose.app.yml`, `compose.yml`), the `postgres/` image, and a `Dockerfile` in each of `server/` and `client/` |
 
 **The content module is one module, not a parser and a serializer.** The mdast AST is the
 canonical representation; directive-Markdown and TipTap's document are both *projections*
@@ -707,11 +707,11 @@ can reasonably satisfy it:
 
 **Two separate Compose files, no profiles.**
 
-- `compose.dev.yml` — Postgres, MinIO, bucket initialisation. Standalone and
+- `project/compose.infra.yml` — Postgres, MinIO, bucket initialisation. Standalone and
   self-sufficient; this is what development runs.
-- `compose.yml` — the full stack. Pulls the dependencies in with Compose's
+- `project/compose.yml` — the full stack. Pulls the dependencies in with Compose's
   `include:` rather than restating them, so the two files can't drift. (If the installed
-  Compose predates `include:`, the equivalent is `-f compose.dev.yml -f compose.app.yml`.)
+  Compose predates `include:`, the equivalent is `-f compose.infra.yml -f compose.app.yml`.)
 
 Wrapped in root scripts so nobody types paths:
 

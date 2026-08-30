@@ -1,5 +1,5 @@
 {
-	"extends": "../tsconfig.json",
+	"extends": "../../tsconfig.json",
 	"compilerOptions": {
 		// Environment settings
 		"lib": ["ESNext"],
@@ -24,5 +24,6 @@
 	"include": ["src/**/*"],
 	// Tests are typechecked by `bun test`, not compiled: `dist/` is what the client resolves
 	// `server/client` to, and test files have no business in that surface.
-	"exclude": ["node_modules", "dist", "src/**/*.test.ts"]
+	"exclude": [
+      "node_modules", "dist", "src/**/*.test.ts"]
 }
