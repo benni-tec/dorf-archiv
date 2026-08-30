@@ -717,12 +717,12 @@ Wrapped in root scripts so nobody types paths:
 
 | Script | Does |
 | --- | --- |
-| `dev:deps` | dependencies only, **foreground**, tearing them down on exit |
-| `dev:deps:up` / `dev:deps:down` | the same dependencies, detached, for when you want them out of the way |
-| `stack:up` / `stack:down` | full stack, shape 2 |
+| `dev:infra` | dependencies only, **foreground**, tearing them down on exit |
+| `dev:infra:up` / `dev:infra:down` | the same dependencies, detached, for when you want them out of the way |
+| `compose:up` / `compose:down` | full stack, shape 2 |
 | `dev` | unchanged — client and server from source, pointed at localhost |
 
-`dev:deps` runs in the foreground and cleans up when you stop it, so there is no separate
+`dev:infra` runs in the foreground and cleans up when you stop it, so there is no separate
 teardown script to forget. Plain `docker compose up` stops containers on Ctrl+C but leaves
 them lying around, and chaining `; docker compose down` doesn't survive an interrupt on
 Windows — so this wants a small **Bun wrapper script** that spawns Compose in the

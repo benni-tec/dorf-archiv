@@ -1,0 +1,54 @@
+{
+	// A copy of project/tsconfig.json, not an `extends` of it.
+	//
+	// These scripts drive the stack from outside it — they start Compose, they are not part
+	// of the workspace and they must keep working whatever happens inside `project/`. Pointing
+	// at that file would make the repository's tooling depend on the thing it operates on,
+	// which is the wrong way round. The duplication is the point; keep the two in step by
+	// hand when the strictness settings change.
+	//
+	// The path aliases are the one deliberate difference: they name real directories from
+	// here rather than dangling at `scripts/server/src`.
+	"compilerOptions": {
+		// Environment setup & latest features
+		"lib": ["ESNext"],
+		"target": "ESNext",
+		"module": "ESNext",
+		"moduleDetection": "force",
+		"allowJs": true,
+
+		// Types
+		"types": ["bun-types"],
+
+		// Path resolution
+		"baseUrl": "./",
+		"paths": {
+			"@server/*": ["../project/server/src/*"],
+			"@client/*": ["../project/client/src/*"],
+			"@shared/*": ["../project/shared/src/*"]
+		},
+
+		// Module resolution
+		"moduleResolution": "bundler",
+		"allowSyntheticDefaultImports": true,
+		"esModuleInterop": true,
+		"verbatimModuleSyntax": true,
+
+		// Strictness and best practices
+		"strict": true,
+		"forceConsistentCasingInFileNames": true,
+		"noFallthroughCasesInSwitch": true,
+		"noUncheckedIndexedAccess": true,
+		"experimentalDecorators": true,
+
+		// Output control
+		"noEmit": true,
+		"skipLibCheck": true,
+
+		// Optional strict flags (disabled by default)
+		"noUnusedLocals": false,
+		"noUnusedParameters": false,
+		"noPropertyAccessFromIndexSignature": false
+	},
+	"include": ["**/*.ts"]
+}

@@ -11,9 +11,9 @@ bun install            # also runs postinstall: turbo build --filter=shared --fi
 bun run dev            # all workspaces (client on :5173, server on :3000)
 bun run dev:client
 bun run dev:server
-bun run dev:deps       # Postgres + MinIO, foreground, torn down when you stop it
-bun run dev:deps:up    # the same, detached — dev:deps:down to stop
-bun run stack:up       # whole stack in containers (app included); stack:down to stop
+bun run dev:infra       # Postgres + MinIO, foreground, torn down when you stop it
+bun run dev:infra:up    # the same, detached — dev:infra:down to stop
+bun run compose:up       # whole stack in containers (app included); compose:down to stop
 bun run db:generate    # drizzle-kit generate / migrate / studio, run from the host
 bun run build          # or build:client / build:server
 bun run lint           # biome lint .
@@ -69,7 +69,11 @@ Root config sets `noUncheckedIndexedAccess` and `verbatimModuleSyntax` (type-onl
 
 ## Current state and direction
 
-**`PLAN.md` §8 step 1 (groundwork) is done; step 2 (the domain core) is next.** What exists: the Compose stack, validated configuration, a Drizzle connection with an empty schema, an S3 client, and `GET /health` reaching both dependencies end to end. What does not: any table, any entity, any authorization. `server/src/db/schema/index.ts` is empty on purpose and records the conventions the first tables inherit.
+**`PLAN.md` §8 step 1 (groundwork) is done; step 2 (the domain core) is in progress.**
+
+Landed so far: the Compose stack; validated configuration; `GET /health`; rough dates in `shared` (§2.5 — the primitive everything archival is dated with); and the first slice of the schema (§5.2) — the `entity` spine with `user`, `entity_version` and `proposal`, plus `person`/`person_content` as the subtype pair every other type copies.
+
+Not yet written: the remaining subtypes (place, media, story, relationship, source, tag, terms), `link`, `citation`, `entity_tag`, `asset`, threads and comments, the role tables, the entity registry, the repository layer with its permission query handlers, and every service. **There is no read path yet, so nothing enforces `proposal_id IS NULL` outside the database** — that guard arrives with the repository, and until then no controller may touch a base table.
 
 Keep `README.md` honest as things land — it currently states one known gap, that the application image serves the API only and not the built client.
 
@@ -97,20 +101,45 @@ Stated requirements are allowed where any host can meet them — **Postgres ≥ 
 - **Image processing stays client-side on the upload path** (bandwidth, and the crop/deskew UI needs the bitmap anyway), but server-side is available for derivatives and batch work. EXIF is stripped server-side on ingest regardless — a contributor photographing a print at home embeds their house's GPS.
 - **The object bucket is private.** Files reach browsers only via short-lived presigned URLs issued after a permission check; unpublished blobs are in storage from upload, so a public policy or guessable key bypasses moderation. `project/compose.infra.yml`'s bucket-init step sets `mc anonymous set none` for exactly this reason — don't relax it to make a URL work in development.
 
+### Server layout
+
+```
+src/
+  app.ts            the Hono app, built by a factory over injected dependencies
+  index.ts          the composition root — the only place env is read or a connection opened
+  client.ts         the typed RPC client re-export
+  config/           environment validation
+  controllers/      HTTP: one chained expression per controller (see below)
+  domain/           framework-free services — no Hono types, so jobs can reuse them
+  persistence/      db/ (Drizzle schema, connection, version guard) and storage/ (S3)
+```
+
+This is PLAN.md §5.1's Controller → Service → Repository, one directory per layer. **Layers earn their place**: a service that only forwards to its repository fails the deletion test and should not exist — the rule says where behaviour goes when there *is* behaviour, not that every entity needs three files.
+
+### The schema
+
+Read `persistence/db/schema/index.ts` first; it states the conventions in one place. Three that bite:
+
+- **`casing: "snake_case"` is set twice** — in `drizzle.config.ts` and again on `drizzle()` in `persistence/db/client.ts`. They must agree, or the query builder emits camelCase names against snake_case columns and every query fails on a column that does not exist.
+- **The audit quartet lives in `schema/entity.ts`, not `columns.ts`**, because it references `entity.id` and would otherwise close an import cycle. Its foreign keys are lazy arrows, which is what lets `entity` carry its own quartet: the first account is inserted referencing its own id, and a row-level foreign key accepts that inside a single statement.
+- **Constraints are the enforcement, not convention.** The four `(proposal_id, version)` combinations, the paired date/granularity columns, the non-overlap rule, "a rejection needs a reason and a moderator" — all are CHECKs, because these rows arrive from the upload form, the moderation UI and any future import alike. Add the constraint with the column.
+
+Migrations are generated with `bun run db:generate` and applied with `bun run db:migrate`, **from the host, never on boot**. Note the scripts invoke `node_modules/drizzle-kit/bin.cjs` directly rather than through `bun x`: `bun x` does not pass on the environment that `--env-file` added, so the config saw no `DATABASE_URL` and failed with every variable missing at once.
+
 ### The Compose stack
 
 Everything the running stack is built from lives under `project/`: the three workspaces, the `postgres/` image, a `Dockerfile` inside each workspace that ships one, and the Compose files. It also holds the base `tsconfig.json` the three workspaces extend, and the `.env`. The repository root keeps what is repository-wide — Biome, the docs, `scripts/`, and the workspace `package.json` with `turbo.json` beside it, because Turbo resolves its config from the directory holding the workspace manifest and will not find it anywhere else.
 
-`project/compose.infra.yml` is standalone and self-sufficient — the backing services development runs against. `project/compose.yml` pulls it in with `include:` alongside `compose.app.yml` rather than restating anything, so the two cannot drift. All three declare `name: dorf-archiv`, so the dev dependencies and the full stack address the *same* volumes; that is intended, and it means `stack:up` sees the database `dev:deps` was using.
+`project/compose.infra.yml` is standalone and self-sufficient — the backing services development runs against. `project/compose.yml` pulls it in with `include:` alongside `compose.app.yml` rather than restating anything, so the two cannot drift. All three declare `name: dorf-archiv`, so the dev dependencies and the full stack address the *same* volumes; that is intended, and it means `compose:up` sees the database `dev:infra` was using.
 
 Four things here cost an afternoon each if rediscovered:
 
-- **Teardown is `down`, never `down -v`.** Volumes are named and must survive being stopped, since `dev:deps` tears down every time you stop it. `scripts/compose.ts` refuses `-v` without `--yes-destroy-data`; don't route around it.
+- **Teardown is `down`, never `down -v`.** Volumes are named and must survive being stopped, since `dev:infra` tears down every time you stop it. `scripts/compose.ts` refuses `-v` without `--yes-destroy-data`; don't route around it.
 - **`postgres:18` moved `PGDATA`** to `/var/lib/postgresql/<major>/docker`. The volume therefore mounts at `/var/lib/postgresql`, not `.../data` — the old path leaves the database in the container's writable layer, where it vanishes on recreate.
 - **`postgres/` exists to make development match a *good* production**, carrying the Hunspell `de_DE` dictionary and registering `german_hunspell`. The init script applies it to `template1` as well as the initial database, so databases created later inherit it. Deployment does not require any of this — `TEXT_SEARCH_CONFIG` selects stock `german` where the dictionary is absent.
 - **Migrations run from the host** via `bun run db:migrate`, never from inside a container and never on boot.
 
-Bun rather than shell for the wrapper scripts, because they behave identically on Windows and Linux — and this is the first thing a contributor touches. Bun is a hard requirement, so they use Bun's own APIs (`Bun.file`, `Bun.spawn`, `Bun.fileURLToPath`) rather than the `node:` compatibility layer; keep new scripts that way. `dev:deps` runs Compose in the foreground and owns the signal handling itself: plain `docker compose up` leaves containers lying around, and appending `; docker compose down` does not survive an interrupt on Windows.
+Bun rather than shell for the wrapper scripts, because they behave identically on Windows and Linux — and this is the first thing a contributor touches. Bun is a hard requirement, so they use Bun's own APIs (`Bun.file`, `Bun.spawn`, `Bun.fileURLToPath`) rather than the `node:` compatibility layer; keep new scripts that way. `dev:infra` runs Compose in the foreground and owns the signal handling itself: plain `docker compose up` leaves containers lying around, and appending `; docker compose down` does not survive an interrupt on Windows.
 
 ## Backend structure
 

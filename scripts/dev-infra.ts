@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
  * Brings up Postgres and MinIO in the foreground and tears them down when you stop it —
- * `bun run dev:deps` (PLAN.md §4.1).
+ * `bun run dev:infra` (PLAN.md §4.1).
  *
  * Foreground with automatic teardown, so there is no separate stop script to forget. Plain
  * `docker compose up` stops the containers on Ctrl+C but leaves them lying around, and
@@ -13,7 +13,7 @@
  */
 import { spawnCompose } from "./compose";
 
-const child = await spawnCompose("deps", ["up"]);
+const child = await spawnCompose("infra", ["up"]);
 
 let interrupts = 0;
 
@@ -30,7 +30,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 			return;
 		}
 		console.log(
-			"\nLeaving containers up. `bun run dev:deps:down` when you're done.",
+			"\nLeaving containers up. `bun run dev:infra:down` when you're done.",
 		);
 		process.exit(130);
 	});
@@ -39,7 +39,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 const upExitCode = await child.exited;
 
 console.log("\nTearing down dependencies (named volumes are kept)…");
-const down = await spawnCompose("deps", ["down"]);
+const down = await spawnCompose("infra", ["down"]);
 const downExitCode = await down.exited;
 
 process.exit(upExitCode || downExitCode);

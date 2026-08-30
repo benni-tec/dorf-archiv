@@ -1,5 +1,5 @@
 import { HeadBucketCommand, S3Client } from "@aws-sdk/client-s3";
-import type { ServerEnv } from "../config/env";
+import type { ServerEnv } from "../../config/env";
 
 /**
  * Object storage.

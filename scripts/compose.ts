@@ -7,14 +7,14 @@
  * else works. Bun is a hard requirement for the repository, so this uses Bun's own APIs
  * rather than the Node compatibility layer.
  *
- * Usage: bun scripts/compose.ts <deps|full> <...docker compose arguments>
+ * Usage: bun scripts/compose.ts <infra|full> <...docker compose arguments>
  */
 
-export type Stack = "deps" | "full";
+export type Stack = "infra" | "full";
 
 const COMPOSE_FILES: Record<Stack, string> = {
 	/** Backing services only — what development runs against source on the host. */
-	deps: "project/compose.infra.yml",
+	infra: "project/compose.infra.yml",
 	/** The whole stack, application and client included. */
 	full: "project/compose.yml",
 };
@@ -42,7 +42,7 @@ export class DestructiveComposeError extends Error {
  * Guards the one Compose invocation that destroys work: `down -v`.
  *
  * PLAN.md §4.1 makes this an invariant rather than a habit — volumes are named and must
- * survive teardown, because `dev:deps` tears the stack down every time you stop it.
+ * survive teardown, because `dev:infra` tears the stack down every time you stop it.
  *
  * @returns the arguments with the acknowledgement flag removed.
  * @throws {DestructiveComposeError} if volumes would be removed without acknowledgement.
@@ -104,7 +104,7 @@ export async function spawnCompose(stack: Stack, args: string[]) {
 }
 
 function isStack(value: string | undefined): value is Stack {
-	return value === "deps" || value === "full";
+	return value === "infra" || value === "full";
 }
 
 if (import.meta.main) {
@@ -112,7 +112,7 @@ if (import.meta.main) {
 
 	if (!isStack(stack)) {
 		console.error(
-			"Usage: bun scripts/compose.ts <deps|full> <...compose arguments>",
+			"Usage: bun scripts/compose.ts <infra|full> <...compose arguments>",
 		);
 		process.exit(2);
 	}

@@ -10,7 +10,7 @@ import { loadEnv } from "./src/config/env";
  * for both the server and Docker Compose.
  */
 export default defineConfig({
-	schema: "./src/db/schema/index.ts",
+	schema: "./src/persistence/db/schema/index.ts",
 	out: "./drizzle",
 	dialect: "postgresql",
 	casing: "snake_case",

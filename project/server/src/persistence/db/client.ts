@@ -1,6 +1,6 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import type { ServerEnv } from "../config/env";
+import type { ServerEnv } from "../../config/env";
 import * as schema from "./schema";
 import { assertSupportedPostgres } from "./version";
 
@@ -36,7 +36,10 @@ export function createDatabase(env: ServerEnv): DatabaseHandle {
 	});
 
 	return {
-		db: drizzle(sql, { schema }),
+		// `casing` must match drizzle.config.ts. Without it the query builder emits the
+		// camelCase property names while the migrations create snake_case columns, and every
+		// query fails on a column that does not exist.
+		db: drizzle(sql, { schema, casing: "snake_case" }),
 
 		probe: async () => {
 			const rows = await sql<{ version_num: number }[]>`

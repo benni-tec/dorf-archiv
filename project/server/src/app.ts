@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { createHealthController } from "./health/controller";
-import type { Probe, ProbeName } from "./health/health";
+import { createHealthController } from "./controllers/health";
+import type { Probe, ProbeName } from "./domain/health";
 
 /**
  * The HTTP app, assembled from injected dependencies.

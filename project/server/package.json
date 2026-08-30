@@ -18,9 +18,9 @@
 		"dev": "bun --watch --env-file=../.env run src/index.ts & tsc --watch",
 		"type-check": "tsc --noEmit",
 		"test": "bun test",
-		"db:generate": "bun --env-file=../.env x drizzle-kit generate",
-		"db:migrate": "bun --env-file=../.env x drizzle-kit migrate",
-		"db:studio": "bun --env-file=../.env x drizzle-kit studio"
+		"db:generate": "bun --env-file=../.env ../../node_modules/drizzle-kit/bin.cjs generate",
+		"db:migrate": "bun --env-file=../.env ../../node_modules/drizzle-kit/bin.cjs migrate",
+		"db:studio": "bun --env-file=../.env ../../node_modules/drizzle-kit/bin.cjs studio"
 	},
 	"dependencies": {
 		"@aws-sdk/client-s3": "^3.1121.0",

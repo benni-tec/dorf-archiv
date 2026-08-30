@@ -1,6 +1,6 @@
 # Backing services for development (PLAN.md §4.1, shape 1).
 #
-# Standalone and self-sufficient: this is what `bun run dev:deps` brings up, with the client
+# Standalone and self-sufficient: this is what `bun run dev:infra` brings up, with the client
 # and server running from source on the host and pointed at localhost. `compose.yml` pulls
 # this file in with `include:` rather than restating it, so the two cannot drift.
 #

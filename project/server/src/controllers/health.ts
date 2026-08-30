@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { checkHealth, type Probe, type ProbeName } from "./health";
+import { checkHealth, type Probe, type ProbeName } from "../domain/health";
 
 /**
  * The health endpoint.

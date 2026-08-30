@@ -71,7 +71,7 @@ the repository scripts under `scripts/` are written against Bun's own APIs, not 
 ```bash
 cp project/.env.example project/.env   # optional — every value has a working default
 bun install            # also prebuilds shared + server (see note below)
-bun run dev:deps       # Postgres + MinIO, foreground, torn down when you stop it
+bun run dev:infra       # Postgres + MinIO, foreground, torn down when you stop it
 bun run dev            # client on :5173, server on :3000
 ```
 
@@ -81,9 +81,9 @@ Then open <http://localhost:5173>, which reports whether the server can reach bo
 | --- | --- |
 | `dev` | client and server from source, with hot reload |
 | `dev:client` / `dev:server` | one workspace only |
-| `dev:deps` | dependencies in the foreground, cleaned up when you stop it |
-| `dev:deps:up` / `dev:deps:down` | the same, detached |
-| `stack:up` / `stack:down` | the whole stack in containers, application included |
+| `dev:infra` | dependencies in the foreground, cleaned up when you stop it |
+| `dev:infra:up` / `dev:infra:down` | the same, detached |
+| `compose:up` / `compose:down` | the whole stack in containers, application included |
 | `db:generate` / `db:migrate` / `db:studio` | Drizzle, run from the host against `DATABASE_URL` |
 | `build` | all workspaces |
 | `test` | `bun test` — the server's suite, then the ones under `scripts/` |
@@ -94,8 +94,8 @@ Configuration is a single `project/.env`, read by both the server and Docker Com
 their credentials cannot drift apart. `project/.env.example` documents every variable; the
 Compose files carry the same values as defaults, so the stack comes up without one.
 
-Teardown never removes volumes — `dev:deps` tears down on exit, and losing the local database
-every time you stop working would be absurd. `bun run dev:deps:down -v` refuses unless you also
+Teardown never removes volumes — `dev:infra` tears down on exit, and losing the local database
+every time you stop working would be absurd. `bun run dev:infra:down -v` refuses unless you also
 pass `--yes-destroy-data`.
 
 The client and server run **from source**, not in containers; only the backing services come
@@ -118,7 +118,7 @@ connection strings, so three shapes work from the same source:
 1. **Development** — app from source, Compose supplying Postgres and MinIO.
 2. **Compose as production** — the whole stack on one box.
    ```bash
-   bun run stack:up
+   bun run compose:up
    ```
 3. **App container + external services** — the image on a platform, with the database and
    object storage supplied by whoever runs them.

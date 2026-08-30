@@ -1,7 +1,7 @@
 import { createApp } from "./app";
 import { EnvError, loadEnv } from "./config/env";
-import { createDatabase } from "./db/client";
-import { createStorage } from "./storage/client";
+import { createDatabase } from "./persistence/db/client";
+import { createStorage } from "./persistence/storage/client";
 
 /**
  * The composition root — the only place that reads the environment or opens a connection.
