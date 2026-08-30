@@ -683,7 +683,7 @@ the closure invariant and link extraction are all enforced there.
 shapes all have to work from the same source and the same configuration mechanism:
 
 1. **Development** — client and server run from source on the host with hot reload, while
-   Compose provides Postgres and MinIO. No containerized app in the loop; waiting on an
+   Compose provides Postgres and Garage. No containerized app in the loop; waiting on an
    image rebuild to see a change is not a dev experience anyone should accept.
 2. **Compose as production** — the whole stack containerized on one box, self-contained.
    A perfectly legitimate deployment, not merely a development convenience.
@@ -707,7 +707,7 @@ can reasonably satisfy it:
 
 **Two separate Compose files, no profiles, and neither includes the other.**
 
-- `project/compose.dev.yml` — Postgres, MinIO, bucket initialisation, pgAdmin, **every
+- `project/compose.dev.yml` — Postgres, Garage, bucket initialisation, pgAdmin, **every
   one of them published on loopback**. This is what development runs against, with the
   client and server from source on the host.
 - `project/compose.yml` — the full stack, application and proxy included, **publishing
@@ -741,8 +741,9 @@ Important: teardown is `down` **without `-v`**. Volumes are named and survive, s
 the dev stack must never wipe the local database.
 
 Two details that otherwise cost an afternoon each: the Compose stack needs a **one-shot
-bucket-creation service** (`mc`) or first-run dev requires clicking through the MinIO
-console, and the **dev Postgres image should carry the Hunspell dictionary** so local
+bucket-initialisation service** or first-run dev requires setting the object store up by
+hand — with Garage that is not merely tedious but required, since a node with no cluster
+layout assigned stores nothing at all, and the **dev Postgres image should carry the Hunspell dictionary** so local
 search behaves like a good production rather than silently better or worse. Migrations run
 from the host via Drizzle, not from inside a container.
 
@@ -1298,7 +1299,7 @@ not after. A German site publishing photographs of identifiable people has real 
 
 ## 8. Sequence
 
-1. **Groundwork** — Compose stack, custom Postgres image, MinIO, Drizzle, one persisted
+1. **Groundwork** — Compose stack, custom Postgres image, Garage, Drizzle, one persisted
    route end to end.
 2. **Domain core** — entity hierarchy, versions, proposals, closure invariant, localized
    content, rough dates. The hardest part, and everything else assumes it.

@@ -1,10 +1,10 @@
 # The whole stack on one box — PLAN.md §4.1 shape 2, a legitimate deployment rather than a
 # development convenience. Brought up by `bun run compose:up`.
 #
-# **Nothing but the proxy is published.** Postgres, MinIO and pgAdmin are reachable only over
-# the Compose network; the proxy is the single way in, and the database has no route through
-# it at all. `compose.dev.yml` is the file that publishes ports, because development needs
-# them — the server and the migrations run from the host there.
+# **Nothing but the proxy is published.** Postgres, Garage, pgAdmin and the storage admin UI
+# are reachable only over the Compose network; the proxy is the single way in, and the
+# database has no route through it at all. `compose.dev.yml` is the file that publishes
+# ports, because development needs them — the server and the migrations run from the host.
 #
 # That is why the two files are written out separately rather than one including the other:
 # an including file can add a published port but cannot take one away, and the difference
@@ -41,51 +41,69 @@ services:
       retries: 12
       start_period: 30s
 
-  minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+  # S3-compatible object storage. The application depends on the S3 API, not on a provider,
+  # so a hosted S3 elsewhere is reached by changing S3_ENDPOINT and nothing else.
+  #
+  # Unpublished, like the database. The proxy is what puts the S3 API on storage.<host>, and
+  # that route is not decoration: presigned URLs are handed to browsers, so the endpoint has
+  # to be reachable by them once uploads land (PLAN.md §4.5).
+  garage:
+    image: dxflrs/garage:v2.3.0
     restart: unless-stopped
-    command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-dorf}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-dorf-dev-secret}
-    # Unpublished for the same reason as the database — the bucket holds unmoderated uploads
-    # from the moment they are made (PLAN.md §4.6 #3).
-    #
-    # This needs revisiting when uploads land: presigned URLs are handed to browsers, so the
-    # S3 endpoint has to be reachable by them, which means a public route of some kind.
+      # Kept out of garage.toml so the committed config carries no secrets; both override
+      # the corresponding config keys.
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:-dorf-dev-admin-token}
     volumes:
-      - minio-data:/data
+      - garage-meta:/var/lib/garage/meta
+      - garage-data:/var/lib/garage/data
+      - ./garage/garage.toml:/etc/garage.toml:ro
 
-  # One-shot bucket creation, so a first run never means clicking through the MinIO console.
-  # It retries rather than depending on a healthcheck, because the MinIO image carries no
-  # reliable in-container probe.
-  minio-init:
-    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+  # One-shot cluster setup: assign the layout, import the key, create the bucket. **Not
+  # optional convenience** — a Garage node with no layout assigned stores nothing at all, so
+  # without this the stack comes up and every write fails.
+  #
+  # A built image, because the Garage image is the bare binary with no shell to run a script
+  # with. The metadata volume is mounted read-only for the node key, which is what the CLI
+  # authenticates its RPC with.
+  garage-init:
+    build:
+      context: garage
+    image: dorf-archiv/garage-init:latest
     depends_on:
-      minio:
+      garage:
         condition: service_started
     environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
       S3_BUCKET: ${S3_BUCKET:-dorf-archiv}
-      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-dorf}
-      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-dorf-dev-secret}
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -eu
-        for attempt in $$(seq 1 30); do
-          if mc alias set local http://minio:9000 "$$S3_ACCESS_KEY_ID" "$$S3_SECRET_ACCESS_KEY" >/dev/null 2>&1; then
-            break
-          fi
-          echo "waiting for minio ($$attempt/30)"
-          sleep 2
-        done
-        mc alias set local http://minio:9000 "$$S3_ACCESS_KEY_ID" "$$S3_SECRET_ACCESS_KEY"
-        mc mb --ignore-existing "local/$$S3_BUCKET"
-        # PLAN.md §4.6 #3: unpublished blobs sit in storage from the moment of upload, so a
-        # public bucket policy would bypass moderation entirely. Files reach browsers only
-        # through short-lived presigned URLs the backend issues after a permission check.
-        mc anonymous set none "local/$$S3_BUCKET"
-        echo "bucket $$S3_BUCKET ready (private)"
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-dorfarchivdev}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-dorf-dev-secret-key-0123456789}
+    volumes:
+      - garage-meta:/var/lib/garage/meta:ro
+      - ./garage/garage.toml:/etc/garage.toml:ro
+
+  # Garage ships no admin interface of its own, so this is the community one, reached at
+  # storage.<host>/_admin. It drives Garage's admin API, which is what the token is for.
+  garage-webui:
+    image: khairul169/garage-webui:1.1.0
+    restart: unless-stopped
+    depends_on:
+      garage:
+        condition: service_started
+    environment:
+      API_BASE_URL: http://garage:3903
+      API_ADMIN_KEY: ${GARAGE_ADMIN_TOKEN:-dorf-dev-admin-token}
+      S3_ENDPOINT_URL: http://garage:3900
+      S3_REGION: ${S3_REGION:-garage}
+      # Served under a prefix on the S3 host, so it has to build its own links with that
+      # prefix. nginx.conf explains why the prefix starts with an underscore.
+      BASE_PATH: /_admin
+      # `username:bcrypt-hash`. Unlike development this one is on the public entry point, and
+      # it administers the store holding unmoderated uploads. The `$$` are escapes — Compose
+      # turns each into a literal `$`, which bcrypt hashes are full of. Regenerate with:
+      #   docker run --rm httpd:2.4-alpine htpasswd -bnBC 10 "" <password>
+      AUTH_USER_PASS: ${GARAGE_WEBUI_AUTH:-admin:$$2y$$10$$wOvQ51f8e8HwCGSePlCf5OVspmuVYvGJe.YHCTqBfzHXVNu1Tf2fm}
 
   # The database's only face on the web, since the database itself has no route in. Reached
   # at db.<host> through the proxy.
@@ -126,7 +144,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      minio-init:
+      garage-init:
         condition: service_completed_successfully
     environment:
       PORT: 3000
@@ -135,10 +153,12 @@ services:
       # full-quality German search. On a host without it, drop this and search degrades to
       # stemming only (PLAN.md §4.3).
       TEXT_SEARCH_CONFIG: ${TEXT_SEARCH_CONFIG:-german_hunspell}
-      S3_ENDPOINT: http://minio:9000
+      S3_ENDPOINT: http://garage:3900
+      # Part of every SigV4 signature, so it has to match garage.toml's s3_region exactly.
+      S3_REGION: ${S3_REGION:-garage}
       S3_BUCKET: ${S3_BUCKET:-dorf-archiv}
-      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-dorf}
-      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-dorf-dev-secret}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-dorfarchivdev}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-dorf-dev-secret-key-0123456789}
       S3_FORCE_PATH_STYLE: "true"
 
   client:
@@ -163,12 +183,14 @@ services:
 
   # The single entry point, routing by hostname (PLAN.md §4.1 shape 2):
   #
-  #   http://${PROXY_HOST}:${PROXY_PORT}       the client
-  #   http://api.${PROXY_HOST}:${PROXY_PORT}   the API
-  #   http://db.${PROXY_HOST}:${PROXY_PORT}    pgAdmin
+  #   http://${PROXY_HOST}:${PROXY_PORT}                 the client
+  #   http://api.${PROXY_HOST}:${PROXY_PORT}             the API
+  #   http://db.${PROXY_HOST}:${PROXY_PORT}              pgAdmin
+  #   http://storage.${PROXY_HOST}:${PROXY_PORT}         the S3 API
+  #   http://storage.${PROXY_HOST}:${PROXY_PORT}/_admin  the object store's admin UI
   #
-  # Each name can be overridden on its own with PROXY_CLIENT_HOST, PROXY_API_HOST or
-  # PROXY_DB_HOST.
+  # Each name can be overridden on its own with PROXY_CLIENT_HOST, PROXY_API_HOST,
+  # PROXY_DB_HOST or PROXY_STORAGE_HOST.
   proxy:
     build:
       # This directory, not the repository root: the proxy needs only its Dockerfile and
@@ -189,10 +211,12 @@ services:
       PROXY_CLIENT_HOST: ${PROXY_CLIENT_HOST:-${PROXY_HOST:-localhost}}
       PROXY_API_HOST: ${PROXY_API_HOST:-api.${PROXY_HOST:-localhost}}
       PROXY_DB_HOST: ${PROXY_DB_HOST:-db.${PROXY_HOST:-localhost}}
+      PROXY_STORAGE_HOST: ${PROXY_STORAGE_HOST:-storage.${PROXY_HOST:-localhost}}
     ports:
       - "${PROXY_BIND_ADDRESS:-0.0.0.0}:${PROXY_PORT:-8000}:80"
 
 volumes:
   postgres-data:
-  minio-data:
+  garage-meta:
+  garage-data:
   pgadmin-data:

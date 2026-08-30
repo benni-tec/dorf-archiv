@@ -1,0 +1,36 @@
+# Garage — the S3-compatible object store (PLAN.md §4.1).
+#
+# The requirement is the S3 *API*, not a provider, so what runs here is only development's
+# and single-box deployment's answer to it; a hosted S3 elsewhere is reached by changing
+# S3_ENDPOINT and nothing else.
+#
+# **No secrets in this file.** `rpc_secret` and `admin_token` are supplied as GARAGE_RPC_SECRET
+# and GARAGE_ADMIN_TOKEN, which override the config — so this can be committed while the
+# values stay in .env with everything else.
+
+metadata_dir = "/var/lib/garage/meta"
+data_dir     = "/var/lib/garage/data"
+
+# sqlite rather than lmdb: one node, modest volume, and no tuning to get wrong.
+db_engine = "sqlite"
+
+# One node, so one copy. Garage's default of 3 would leave the cluster permanently degraded.
+replication_factor = 1
+
+rpc_bind_addr = "[::]:3901"
+# Reachable under this name from the other containers, which is what lets the init container
+# drive the CLI over RPC rather than needing a shell inside the node.
+rpc_public_addr = "garage:3901"
+
+[s3_api]
+# Part of every SigV4 signature, so the application's S3_REGION must match it exactly.
+s3_region     = "garage"
+api_bind_addr = "[::]:3900"
+
+# `root_domain` is deliberately unset. Setting it turns on virtual-host-style addressing,
+# where the bucket is read out of the Host header — and the proxy puts the whole S3 API on
+# one name, so every request would resolve to a bucket named after that host. Path-style it
+# is, which is why the application sets S3_FORCE_PATH_STYLE.
+
+[admin]
+api_bind_addr = "[::]:3903"

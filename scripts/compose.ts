@@ -31,7 +31,7 @@ const DESTROY_ACKNOWLEDGEMENT = "--yes-destroy-data";
 export class DestructiveComposeError extends Error {
 	constructor() {
 		super(
-			`Refusing to remove volumes: that deletes the local Postgres data and the MinIO bucket.\n` +
+			`Refusing to remove volumes: that deletes the local Postgres data and the object store.\n` +
 				`Teardown is \`down\` without \`-v\`. If you really mean it, add ${DESTROY_ACKNOWLEDGEMENT}.`,
 		);
 		this.name = "DestructiveComposeError";

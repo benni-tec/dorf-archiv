@@ -4,7 +4,7 @@ A community archive for a village's history. Locals contribute photos and storie
 people and places around them, from their phones, and everything lands on an interactive map
 tied to a timeline.
 
-> **Status: early.** The groundwork is in place — Compose stack, Postgres and MinIO, Drizzle,
+> **Status: early.** The groundwork is in place — Compose stack, Postgres and Garage, Drizzle,
 > configuration and a health endpoint end to end — but no domain code is written yet. The
 > design is settled and documented; `PLAN.md` §8 is the order things land in.
 
@@ -60,7 +60,7 @@ project/
 The repository root keeps what is repository-wide: Turbo and Biome, the docs, `scripts/`, and
 the workspace `package.json` — Turbo requires its config beside that, so both stay put.
 
-- **Server** — Hono, Drizzle, Postgres, S3-compatible object storage, better-auth
+- **Server** — Hono, Drizzle, Postgres, Garage (S3-compatible object storage), better-auth
 - **Client** — Vite, React 19, TanStack Router + Query, Tailwind v4, shadcn/ui, MapLibre GL JS,
   TipTap, Paraglide
 - **Shared** — cross-boundary types, the content format parser, fuzzy-date formatting
@@ -73,7 +73,7 @@ the repository scripts under `scripts/` are written against Bun's own APIs, not 
 ```bash
 cp project/.env.example project/.env   # optional — every value has a working default
 bun install            # also prebuilds shared + server (see note below)
-bun run dev:infra       # Postgres, MinIO and pgAdmin on localhost, torn down on exit
+bun run dev:infra       # Postgres, Garage and pgAdmin on localhost, torn down on exit
 bun run dev            # client on :5173, server on :3000
 ```
 
@@ -84,7 +84,7 @@ The infrastructure brings up two consoles alongside them, both on loopback only:
 | | |
 | --- | --- |
 | <http://localhost:5050> | **pgAdmin** — the Postgres connection is pre-registered, so there is nothing to fill in. Log in with `PGADMIN_EMAIL` / `PGADMIN_PASSWORD` from `project/.env`, then supply the database password (`POSTGRES_PASSWORD`) the first time you expand the server. |
-| <http://localhost:9001> | **MinIO** — the bucket is created for you, and private. |
+| <http://localhost:3909> | **Garage's web UI** — the bucket is created for you, and private. |
 
 | Script | Does |
 | --- | --- |
@@ -124,7 +124,7 @@ point at localhost.
 Only the application is containerized. Postgres and object storage are always reached through
 connection strings, so three shapes work from the same source:
 
-1. **Development** — app from source, Compose supplying Postgres and MinIO.
+1. **Development** — app from source, Compose supplying Postgres and Garage.
 2. **Compose as production** — the whole stack on one box, behind one reverse proxy.
    ```bash
    bun run compose:up
@@ -137,14 +137,19 @@ connection strings, so three shapes work from the same source:
    | `<host>` | the client |
    | `api.<host>` | the API |
    | `db.<host>` | pgAdmin |
+   | `storage.<host>` | the S3 API |
+   | `storage.<host>/_admin` | the object store's admin UI |
+   | `storage.<host>` | the S3 API |
+   | `storage.<host>/_admin` | the object store's admin UI |
 
    `<host>` is `PROXY_HOST`. Each name is assembled in `compose.yml` from it, the way the
    database URL is assembled from its parts, so any one of them can be moved to an unrelated
    domain with `PROXY_CLIENT_HOST`, `PROXY_API_HOST` or `PROXY_DB_HOST`.
 
    **The database is not routed through the proxy, and nothing but the proxy is published.**
-   Postgres, MinIO and pgAdmin are reachable only over the Compose network; a human inspects
-   the database through pgAdmin on `db.<host>`. Development is the opposite — see below.
+   Postgres, Garage and both consoles are reachable only over the Compose network; a human
+   inspects the database through pgAdmin on `db.<host>` and the object store at
+   `storage.<host>/_admin`. Development is the opposite — see below.
 
    The proxy's upstreams are resolved per request rather than at start-up, so it comes up
    whether or not the services behind it exist and stays up while one restarts; a missing

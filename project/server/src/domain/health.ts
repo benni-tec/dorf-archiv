@@ -3,7 +3,7 @@
  * check is callable from a startup gate or a background job, not only from a request.
  *
  * The probes are injected rather than imported, which is what lets every branch below be
- * tested without a running Postgres or MinIO.
+ * tested without a running Postgres or object store.
  */
 
 /**

@@ -2,9 +2,11 @@
 #
 # Routes by hostname, all on the port the proxy is published on:
 #
-#   <host>       the client
-#   api.<host>   the API
-#   db.<host>    pgAdmin
+#   <host>                  the client
+#   api.<host>              the API
+#   db.<host>               pgAdmin
+#   storage.<host>          the S3 API
+#   storage.<host>/_admin   the object store's admin UI
 #
 # The database itself is not proxied. It stays on its own loopback-bound port, which is what
 # the server running from source and `bun run db:migrate` connect to — see nginx.conf.
@@ -31,5 +33,6 @@ ENV NGINX_ENVSUBST_FILTER=^PROXY_
 ENV PROXY_CLIENT_HOST=localhost
 ENV PROXY_API_HOST=api.localhost
 ENV PROXY_DB_HOST=db.localhost
+ENV PROXY_STORAGE_HOST=storage.localhost
 
 EXPOSE 80

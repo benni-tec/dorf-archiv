@@ -41,7 +41,7 @@ const schema = z.object({
 	S3_BUCKET: nonEmpty,
 	S3_ACCESS_KEY_ID: nonEmpty,
 	S3_SECRET_ACCESS_KEY: nonEmpty,
-	/** MinIO and most self-hosted S3 implementations serve path-style URLs only. */
+	/** Garage and most self-hosted S3 implementations serve path-style URLs only. */
 	S3_FORCE_PATH_STYLE: booleanish.default(true),
 });
 

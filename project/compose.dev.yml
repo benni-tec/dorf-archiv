@@ -8,7 +8,7 @@
 # So: **every backing service is published here, and none of them are in `compose.yml`.**
 # Development needs `localhost:5432` for the server and for `bun run db:migrate`, which the
 # plan has running from the host and never from inside a container. A deployment needs the
-# opposite — the proxy is its only way in, and the database has no route through it.
+# opposite — the proxy is its only way in.
 #
 # The application, the client and the proxy are deliberately absent. In development they are
 # not containers: the client is on :5173 and the server on :3000, from source, with hot
@@ -45,49 +45,65 @@ services:
       retries: 12
       start_period: 30s
 
-  minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+  # S3-compatible object storage. The application depends on the S3 API, not on a provider,
+  # so this is only development's answer to it — a hosted S3 is reached by changing
+  # S3_ENDPOINT and nothing else.
+  garage:
+    image: dxflrs/garage:v2.3.0
     restart: unless-stopped
-    command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-dorf}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-dorf-dev-secret}
+      # Kept out of garage.toml so the committed config carries no secrets; both override
+      # the corresponding config keys.
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:-dorf-dev-admin-token}
     ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:${S3_PORT:-9000}:9000"
-      - "${BIND_ADDRESS:-127.0.0.1}:${S3_CONSOLE_PORT:-9001}:9001"
+      - "${BIND_ADDRESS:-127.0.0.1}:${S3_PORT:-3900}:3900"
     volumes:
-      - minio-data:/data
+      - garage-meta:/var/lib/garage/meta
+      - garage-data:/var/lib/garage/data
+      - ./garage/garage.toml:/etc/garage.toml:ro
 
-  # One-shot bucket creation, so a first run never means clicking through the MinIO console.
-  # It retries rather than depending on a healthcheck, because the MinIO image carries no
-  # reliable in-container probe.
-  minio-init:
-    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+  # One-shot cluster setup: assign the layout, import the key from .env, create the bucket.
+  # **Not optional convenience** — a Garage node with no layout assigned stores nothing at
+  # all, so without this the stack comes up and every write fails.
+  #
+  # A built image, because the Garage image is the bare binary with no shell to run a script
+  # with. The metadata volume is mounted read-only for the node key, which is what the CLI
+  # authenticates its RPC with.
+  garage-init:
+    build:
+      context: garage
+    image: dorf-archiv/garage-init:latest
     depends_on:
-      minio:
+      garage:
         condition: service_started
     environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
       S3_BUCKET: ${S3_BUCKET:-dorf-archiv}
-      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-dorf}
-      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-dorf-dev-secret}
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -eu
-        for attempt in $$(seq 1 30); do
-          if mc alias set local http://minio:9000 "$$S3_ACCESS_KEY_ID" "$$S3_SECRET_ACCESS_KEY" >/dev/null 2>&1; then
-            break
-          fi
-          echo "waiting for minio ($$attempt/30)"
-          sleep 2
-        done
-        mc alias set local http://minio:9000 "$$S3_ACCESS_KEY_ID" "$$S3_SECRET_ACCESS_KEY"
-        mc mb --ignore-existing "local/$$S3_BUCKET"
-        # PLAN.md §4.6 #3: unpublished blobs sit in storage from the moment of upload, so a
-        # public bucket policy would bypass moderation entirely. Files reach browsers only
-        # through short-lived presigned URLs the backend issues after a permission check.
-        mc anonymous set none "local/$$S3_BUCKET"
-        echo "bucket $$S3_BUCKET ready (private)"
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-dorfarchivdev}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-dorf-dev-secret-key-0123456789}
+    volumes:
+      - garage-meta:/var/lib/garage/meta:ro
+      - ./garage/garage.toml:/etc/garage.toml:ro
+
+  # Garage ships no admin interface of its own, so this is the community one. It drives
+  # Garage's admin API, which is what the token is for.
+  #
+  # No AUTH_USER_PASS here: it is on loopback and nothing is in front of it. `compose.yml`
+  # sets one, because there it is published through the proxy.
+  garage-webui:
+    image: khairul169/garage-webui:1.1.0
+    restart: unless-stopped
+    depends_on:
+      garage:
+        condition: service_started
+    environment:
+      API_BASE_URL: http://garage:3903
+      API_ADMIN_KEY: ${GARAGE_ADMIN_TOKEN:-dorf-dev-admin-token}
+      S3_ENDPOINT_URL: http://garage:3900
+      S3_REGION: ${S3_REGION:-garage}
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${GARAGE_WEBUI_PORT:-3909}:3909"
 
   # A database console, so inspecting a row does not mean remembering psql flags. Reached
   # directly at http://localhost:5050 here — there is no proxy in development to put it
@@ -117,5 +133,6 @@ services:
 
 volumes:
   postgres-data:
-  minio-data:
+  garage-meta:
+  garage-data:
   pgadmin-data:
