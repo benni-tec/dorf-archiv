@@ -48,6 +48,8 @@ project/
   server/              the Hono API, plus its image
   shared/              cross-boundary types
   postgres/            Postgres 18 carrying the Hunspell dictionary
+  pgadmin/             the pre-registered server connection
+  proxy/               the reverse proxy that fronts the stack
   compose.infra.yml    backing services — what development runs against
   compose.app.yml      the app and client services
   compose.yml          both of the above, via `include:`
@@ -123,10 +125,30 @@ Only the application is containerized. Postgres and object storage are always re
 connection strings, so three shapes work from the same source:
 
 1. **Development** — app from source, Compose supplying Postgres and MinIO.
-2. **Compose as production** — the whole stack on one box.
+2. **Compose as production** — the whole stack on one box, behind one reverse proxy.
    ```bash
    bun run compose:up
    ```
+
+   Everything is reached through the proxy, on `PROXY_PORT`, routed by hostname:
+
+   | | |
+   | --- | --- |
+   | `<host>` | the client |
+   | `api.<host>` | the API |
+   | `admin.db.<host>` | pgAdmin |
+   | `<host>:<db-port>` | Postgres |
+
+   `<host>` is `PROXY_HOST`. Each name is assembled in `compose.app.yml` from it, the way
+   the database URL is assembled from its parts, so any one of them can be moved to an
+   unrelated domain with `PROXY_CLIENT_HOST`, `PROXY_API_HOST` or `PROXY_ADMIN_HOST`.
+
+   Postgres gets a **port rather than a hostname** because its wire protocol carries nothing
+   to route on — no Host header, and no TLS handshake for nginx to read a name out of. See
+   `project/proxy/stream.conf`.
+
+   The client's API URL is baked into its bundle at build time, so it follows the proxy's
+   names and a change of hostname means rebuilding that image.
 3. **App container + external services** — the image on a platform, with the database and
    object storage supplied by whoever runs them.
    ```bash

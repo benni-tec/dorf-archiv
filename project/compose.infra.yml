@@ -74,6 +74,13 @@ services:
       # The value is a Python list literal, which is what pgAdmin parses this into.
       PGADMIN_CONFIG_ALLOW_SPECIAL_EMAIL_DOMAINS: "['test', 'local', 'localhost', 'invalid']"
       PGADMIN_SERVER_JSON_FILE: /pgadmin4/servers.json
+      # Behind the reverse proxy, pgAdmin must build its redirects from the forwarded
+      # headers rather than from the container's own name, or the login loops. Each count is
+      # the number of proxies adding that header — one.
+      PGADMIN_CONFIG_PROXY_X_HOST_COUNT: "1"
+      PGADMIN_CONFIG_PROXY_X_PREFIX_COUNT: "1"
+      PGADMIN_CONFIG_PROXY_X_PROTO_COUNT: "1"
+      PGADMIN_CONFIG_PROXY_X_FOR_COUNT: "1"
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${PGADMIN_PORT:-5050}:80"
     volumes:

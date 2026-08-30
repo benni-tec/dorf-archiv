@@ -1,0 +1,61 @@
+# Host-based routing for everything that speaks HTTP.
+#
+# Rendered at container start by the nginx image's envsubst entrypoint, which is why the
+# names survive into here as placeholders. NGINX_ENVSUBST_FILTER limits the substitution to
+# PROXY_-prefixed names, so nginx's own $host and $proxy_add_x_forwarded_for are left alone.
+#
+# Each name arrives whole. This file does not know that the API is "api." prefixed onto a
+# base host — compose assembles the names, the way it assembles DATABASE_URL — so putting
+# one of them on an unrelated domain needs no change here.
+#
+# `server_name` matches the Host header with any port stripped, so all of these answer on
+# whatever ${PROXY_PORT} the proxy is published on.
+
+# Anything arriving under a name we do not serve. Without this the first server block
+# becomes the default and a stray Host header would silently reach the client app.
+server {
+	listen      80 default_server;
+	server_name _;
+	return      404;
+}
+
+# The client — the archive itself, on the bare host.
+server {
+	listen      80;
+	server_name ${PROXY_CLIENT_HOST};
+
+	location / {
+		proxy_pass http://client:80;
+		include    /etc/nginx/forwarded.conf;
+	}
+}
+
+# The API.
+server {
+	listen      80;
+	server_name ${PROXY_API_HOST};
+
+	location / {
+		proxy_pass http://app:3000;
+		include    /etc/nginx/forwarded.conf;
+	}
+}
+
+# pgAdmin. It builds absolute URLs for its redirects, so it needs the forwarded headers and
+# the matching PGADMIN_CONFIG_PROXY_X_* counts in compose.infra.yml — without both it
+# redirects you to the container's own name and the login loops.
+server {
+	listen      80;
+	server_name ${PROXY_ADMIN_HOST};
+
+	location / {
+		proxy_pass http://pgadmin:80;
+		include    /etc/nginx/forwarded.conf;
+
+		# pgAdmin's query tool and dashboards run over websockets.
+		proxy_http_version 1.1;
+		proxy_set_header   Upgrade    $http_upgrade;
+		proxy_set_header   Connection "upgrade";
+		proxy_read_timeout 3600s;
+	}
+}
