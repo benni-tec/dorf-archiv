@@ -49,8 +49,8 @@ Four layers, each adding exactly one capability:
 
 - **`Entity`** — identity, the type discriminator, and the audit quartet
   (`created_at`/`created_by`/`updated_at`/`updated_by`) that §2.2a requires everywhere.
-  `User` and `Comment` descend from it directly: both have identity and an audit trail,
-  neither has versions.
+  `User`, `Thread` and `Comment` descend from it directly: each has identity and an audit
+  trail, none has versions.
 - **`VersionedEntity`** — versioning and the propose/publish workflow. Everything
   publishable descends from it.
 - **`LocalizedEntity`** — an original language and per-language content rows.
@@ -74,7 +74,9 @@ classDiagram
         +bool emailVerified
         +bool approved
     }
-    class Thread
+    class Thread {
+        +int on_version
+    }
     class VersionedEntity {
         +int version
     }
@@ -119,6 +121,7 @@ classDiagram
 
     Entity <|-- User
     Entity <|-- Thread
+    Entity <|-- Comment
     Entity <|-- VersionedEntity
     VersionedEntity <|-- LocalizedEntity
 
@@ -196,8 +199,6 @@ classDiagram
         +string locator
     }
     class Comment {
-        +UUIDv7 id
-        +int on_version
         +Markdown body
         +ModerationState status
     }
@@ -580,24 +581,26 @@ this" with an index scan and no semantics to get wrong.
 
 ### 2.8 Threads and comments
 
-Discussion attaches to a `HistoricEntity` as **threads**, not as a flat comment list. A
-`Thread` is the `Entity` — it has identity, an audit trail and a subject — and it houses
-its `Comment`s **in creation order**. Several conversations can therefore run on one
-photograph ("who is second from the left" and "this is the old school, not the Rathaus")
-without collapsing into one undifferentiated pile.
+Discussion attaches to a `HistoricEntity` as **threads**, not as a flat comment list.
+`Thread` and `Comment` are **both `Entity`s** — each has identity, an audit trail and a
+UUIDv7 id — and a thread houses its comments **in creation order**. Several conversations
+can therefore run on one photograph ("who is second from the left" and "this is the old
+school, not the Rathaus") without collapsing into one undifferentiated pile.
+
+**The version anchor lives on the thread**, not on each comment: `on_version` records the
+state of the record the discussion is *about*. That is the right grain — a conversation has
+a subject, and if the entity is corrected afterwards the whole discussion may be talking
+about something that no longer says what it said. The UI flags the thread, not each reply,
+which is both less noisy and more accurate.
 
 **Ordering is by id, not by a timestamp.** Since ids are UUIDv7 (§5.2) they are already
 time-ordered, so creation order *is* id order: no sort column to maintain, no tie-break
 needed when two replies land in the same millisecond, and a stable order that can't drift
 if a timestamp is ever corrected.
 
-Neither threads nor comments are **versioned** — an utterance is not a revision, and a
-comment never bumps the entity's version. Each comment records the entity version it was
-written against, so the UI can flag "this refers to an earlier version", which matters in
-an archive where facts get corrected. Moderation is **per comment**, not per thread: one
-bad reply shouldn't hide a useful conversation. No editing: delete and repost.
-
-The thread's own anchor is derived from its first comment rather than stored twice.
+Neither threads nor comments are **versioned** — an utterance is not a revision, and
+commenting never bumps the entity's version. Moderation is **per comment**, not per thread:
+one bad reply shouldn't hide a useful conversation. No editing: delete and repost.
 
 ---
 
@@ -1034,8 +1037,8 @@ For this data that is already public in `created_at`.)
 | --- | --- |
 | `entity` | `id`, `type` (discriminator), audit quartet, plus nullable `version` and `original_language` — the collapsed spine (see below) |
 | `user` | `entity_id`, email, alias, `email_verified`, `approved` |
-| `thread` | `entity_id`, target entity |
-| `comment` | `thread_id`, `on_version`, body, moderation status — **not** an entity; ordered by its own UUIDv7 `id` |
+| `thread` | `entity_id`, target entity, `on_version` — the version the discussion is about |
+| `comment` | `entity_id`, `thread_id`, body, moderation status — an entity, ordered by its UUIDv7 `id` |
 | `entity_version` | `(entity_id, version)`, `published_at`, `published_by`, `redaction_reason` |
 | `proposal` | `id`, `entity_id`, `kind` (create/edit), `status`, `rejection_reason`, `moderator_id`, `based_on_version`, `terms_version` |
 
@@ -1052,8 +1055,8 @@ carry almost nothing:
   their own tables keyed by `entity_id`, so it is a pure marker
 
 So the spine collapses into `entity`, with `version` and `original_language` **nullable —
-null for `User` and `Comment`**, which is exactly what "descends from `Entity` but not
-`VersionedEntity`" means in table terms. Table-per-type still applies where it earns its
+null for `User`, `Thread` and `Comment`**, which is exactly what "descends from `Entity` but
+not `VersionedEntity`" means in table terms. Table-per-type still applies where it earns its
 keep: the subtypes and their content companions. A Person read is then
 `entity ⋈ person ⋈ person_content`.
 
