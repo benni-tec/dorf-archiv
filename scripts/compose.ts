@@ -80,13 +80,15 @@ export function buildComposeArgs(
 }
 
 /**
- * The repository-root `.env`, or null when there isn't one.
+ * The project's `.env`, or null when there isn't one.
  *
- * Passing it explicitly matters: the compose files live under `project/`, so Compose would
- * otherwise look for a `.env` beside them and quietly find nothing.
+ * Passing it explicitly matters: Compose would otherwise look for a `.env` in its own
+ * project directory, and `docker` is spawned from the repository root.
  */
 export async function findEnvFile(): Promise<string | null> {
-	const candidate = Bun.fileURLToPath(new URL("../.env", import.meta.url));
+	const candidate = Bun.fileURLToPath(
+		new URL("../project/.env", import.meta.url),
+	);
 	return (await Bun.file(candidate).exists()) ? candidate : null;
 }
 

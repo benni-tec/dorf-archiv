@@ -51,7 +51,12 @@ project/
   compose.infra.yml    backing services — what development runs against
   compose.app.yml      the app and client services
   compose.yml          both of the above, via `include:`
+  tsconfig.json        the base config the three workspaces extend
+  .env                 the one configuration file, for the server and Compose alike
 ```
+
+The repository root keeps what is repository-wide: Turbo and Biome, the docs, `scripts/`, and
+the workspace `package.json` — Turbo requires its config beside that, so both stay put.
 
 - **Server** — Hono, Drizzle, Postgres, S3-compatible object storage, better-auth
 - **Client** — Vite, React 19, TanStack Router + Query, Tailwind v4, shadcn/ui, MapLibre GL JS,
@@ -64,7 +69,7 @@ Requires [Bun](https://bun.sh) and Docker. Bun is assumed rather than merely sup
 the repository scripts under `scripts/` are written against Bun's own APIs, not Node's.
 
 ```bash
-cp .env.example .env   # optional — every value has a working default
+cp project/.env.example project/.env   # optional — every value has a working default
 bun install            # also prebuilds shared + server (see note below)
 bun run dev:deps       # Postgres + MinIO, foreground, torn down when you stop it
 bun run dev            # client on :5173, server on :3000
@@ -85,8 +90,8 @@ Then open <http://localhost:5173>, which reports whether the server can reach bo
 | `type-check` | `tsc --noEmit` across all three workspaces |
 | `lint` / `format` | Biome — tabs, double quotes |
 
-Configuration is a single `.env` at the repository root, read by both the server and Docker
-Compose so their credentials cannot drift apart. `.env.example` documents every variable; the
+Configuration is a single `project/.env`, read by both the server and Docker Compose so
+their credentials cannot drift apart. `project/.env.example` documents every variable; the
 Compose files carry the same values as defaults, so the stack comes up without one.
 
 Teardown never removes volumes — `dev:deps` tears down on exit, and losing the local database

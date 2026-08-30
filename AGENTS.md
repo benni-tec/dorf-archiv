@@ -28,9 +28,9 @@ Formatting/linting is Biome, not ESLint/Prettier: **tabs** for indentation, **do
 
 ### Configuration
 
-**One `.env`, at the repository root**, read by both the server and Docker Compose so their credentials cannot drift apart. `.env.example` documents every variable.
+**One `.env`, at `project/.env`**, read by both the server and Docker Compose so their credentials cannot drift apart. `project/.env.example` documents every variable.
 
-Bun does **not** walk up from the working directory to find `.env`, and Turbo runs each script with the workspace as its cwd — so the server's scripts pass `--env-file=../.env` explicitly. Bun tolerates that file being absent, which is deliberate: every variable has a working default baked into the Compose files.
+Bun does **not** walk up from the working directory to find `.env`, and Turbo runs each script with the workspace as its cwd — so the server's scripts pass `--env-file=../.env` explicitly, and `scripts/compose.ts` passes `--env-file` to Compose for the same reason. Bun tolerates that file being absent, which is deliberate: every variable has a working default baked into the Compose files.
 
 `server/src/config/env.ts` is the only place environment variables are *interpreted*. Exactly two callers hand it `process.env` — the composition root and `drizzle.config.ts` — and nothing else reads it at all. Everything downstream takes a `ServerEnv`, which is what stops a silent `process.env.FOO ?? "default"` appearing mid-domain later. It reports every bad variable at once and never echoes a value, since half of them are credentials.
 
@@ -99,7 +99,7 @@ Stated requirements are allowed where any host can meet them — **Postgres ≥ 
 
 ### The Compose stack
 
-Everything the running stack is built from lives under `project/`: the three workspaces, the `postgres/` image, a `Dockerfile` inside each workspace that ships one, and the Compose files. The repository root keeps only what is genuinely repository-wide — Turbo, Biome, the root `tsconfig.json`, the docs, and `scripts/`.
+Everything the running stack is built from lives under `project/`: the three workspaces, the `postgres/` image, a `Dockerfile` inside each workspace that ships one, and the Compose files. It also holds the base `tsconfig.json` the three workspaces extend, and the `.env`. The repository root keeps what is repository-wide — Biome, the docs, `scripts/`, and the workspace `package.json` with `turbo.json` beside it, because Turbo resolves its config from the directory holding the workspace manifest and will not find it anywhere else.
 
 `project/compose.infra.yml` is standalone and self-sufficient — the backing services development runs against. `project/compose.yml` pulls it in with `include:` alongside `compose.app.yml` rather than restating anything, so the two cannot drift. All three declare `name: dorf-archiv`, so the dev dependencies and the full stack address the *same* volumes; that is intended, and it means `stack:up` sees the database `dev:deps` was using.
 

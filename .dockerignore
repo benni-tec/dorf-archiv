@@ -19,7 +19,8 @@ build
 .idea
 .vscode
 
-# Never bake local credentials into an image.
-.env
-.env.*
-!.env.example
+# Never bake local credentials into an image. These need the `**/` — a bare `.env`
+# matches only the context root, and the real one lives in `project/`.
+**/.env
+**/.env.*
+!**/.env.example

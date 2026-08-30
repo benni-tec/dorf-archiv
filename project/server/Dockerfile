@@ -13,7 +13,8 @@ FROM oven/bun:1.4-alpine AS build
 WORKDIR /app
 
 # Manifests first, so a dependency-free source change reuses the install layer.
-COPY package.json bun.lock turbo.json tsconfig.json ./
+COPY package.json bun.lock turbo.json ./
+COPY project/tsconfig.json project/tsconfig.json
 COPY project/shared/package.json project/shared/package.json
 COPY project/server/package.json project/server/package.json
 COPY project/client/package.json project/client/package.json
