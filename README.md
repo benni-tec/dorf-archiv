@@ -71,11 +71,18 @@ the repository scripts under `scripts/` are written against Bun's own APIs, not 
 ```bash
 cp project/.env.example project/.env   # optional — every value has a working default
 bun install            # also prebuilds shared + server (see note below)
-bun run dev:infra       # Postgres + MinIO, foreground, torn down when you stop it
+bun run dev:infra       # Postgres, MinIO and pgAdmin, torn down when you stop it
 bun run dev            # client on :5173, server on :3000
 ```
 
 Then open <http://localhost:5173>, which reports whether the server can reach both.
+
+The infrastructure brings up two consoles alongside them, both on loopback only:
+
+| | |
+| --- | --- |
+| <http://localhost:5050> | **pgAdmin** — the Postgres connection is pre-registered, so there is nothing to fill in. Log in with `PGADMIN_EMAIL` / `PGADMIN_PASSWORD` from `project/.env`, then supply the database password (`POSTGRES_PASSWORD`) the first time you expand the server. |
+| <http://localhost:9001> | **MinIO** — the bucket is created for you, and private. |
 
 | Script | Does |
 | --- | --- |

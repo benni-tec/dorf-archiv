@@ -50,6 +50,36 @@ services:
     volumes:
       - minio-data:/data
 
+  # A database console, so inspecting a row does not mean remembering psql flags. Reachable
+  # at http://localhost:5050 with the credentials from .env.
+  #
+  # It is in *this* file rather than a separate one because `compose.yml` includes this file
+  # wholesale, which means pgAdmin comes up with the full stack too. The loopback binding
+  # below is what keeps that from being a mistake — a database console published on every
+  # interface is a far better target than the database itself.
+  pgadmin:
+    image: dpage/pgadmin4:9.17
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@dorf-archiv.test}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-dorf-dev-secret}
+      # Nothing here is reachable from outside the box, and a master password on top of the
+      # login is one more thing to lose in a development tool.
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+      # `.test` is the TLD reserved for exactly this, so the default login can never be a
+      # real address — but pgAdmin rejects reserved TLDs until they are allowed explicitly.
+      # The value is a Python list literal, which is what pgAdmin parses this into.
+      PGADMIN_CONFIG_ALLOW_SPECIAL_EMAIL_DOMAINS: "['test', 'local', 'localhost', 'invalid']"
+      PGADMIN_SERVER_JSON_FILE: /pgadmin4/servers.json
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${PGADMIN_PORT:-5050}:80"
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+      - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
+
   # One-shot bucket creation. Without it, first-run development means clicking through the
   # MinIO console. It retries rather than depending on a healthcheck, because the MinIO
   # image carries no reliable in-container probe.
@@ -84,3 +114,4 @@ services:
 volumes:
   postgres-data:
   minio-data:
+  pgadmin-data:

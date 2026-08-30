@@ -11,7 +11,7 @@ bun install            # also runs postinstall: turbo build --filter=shared --fi
 bun run dev            # all workspaces (client on :5173, server on :3000)
 bun run dev:client
 bun run dev:server
-bun run dev:infra       # Postgres + MinIO, foreground, torn down when you stop it
+bun run dev:infra       # Postgres, MinIO and pgAdmin, torn down when you stop it
 bun run dev:infra:up    # the same, detached — dev:infra:down to stop
 bun run compose:up       # whole stack in containers (app included); compose:down to stop
 bun run db:generate    # drizzle-kit generate / migrate / studio, run from the host
@@ -138,6 +138,7 @@ Four things here cost an afternoon each if rediscovered:
 - **`postgres:18` moved `PGDATA`** to `/var/lib/postgresql/<major>/docker`. The volume therefore mounts at `/var/lib/postgresql`, not `.../data` — the old path leaves the database in the container's writable layer, where it vanishes on recreate.
 - **`postgres/` exists to make development match a *good* production**, carrying the Hunspell `de_DE` dictionary and registering `german_hunspell`. The init script applies it to `template1` as well as the initial database, so databases created later inherit it. Deployment does not require any of this — `TEXT_SEARCH_CONFIG` selects stock `german` where the dictionary is absent.
 - **Migrations run from the host** via `bun run db:migrate`, never from inside a container and never on boot.
+- **pgAdmin is in the infra file, so it comes up with the full stack too**, since `compose.yml` includes that file wholesale. The loopback binding is what keeps that from being a mistake — a database console published on every interface is a better target than the database. It reads `pgadmin/servers.json` **once, on first run**: changing that file later does nothing until the `pgadmin-data` volume is removed. Its default login uses the reserved `.test` TLD, which pgAdmin refuses until `PGADMIN_CONFIG_ALLOW_SPECIAL_EMAIL_DOMAINS` lists it — the container exits at startup with a validation error otherwise.
 
 Bun rather than shell for the wrapper scripts, because they behave identically on Windows and Linux — and this is the first thing a contributor touches. Bun is a hard requirement, so they use Bun's own APIs (`Bun.file`, `Bun.spawn`, `Bun.fileURLToPath`) rather than the `node:` compatibility layer; keep new scripts that way. `dev:infra` runs Compose in the foreground and owns the signal handling itself: plain `docker compose up` leaves containers lying around, and appending `; docker compose down` does not survive an interrupt on Windows.
 

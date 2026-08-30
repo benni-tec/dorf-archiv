@@ -1,0 +1,14 @@
+{
+	"Servers": {
+		"1": {
+			"Name": "dorf-archiv",
+			"Group": "Servers",
+			"Host": "postgres",
+			"Port": 5432,
+			"MaintenanceDB": "dorf_archiv",
+			"Username": "dorf",
+			"SSLMode": "prefer",
+			"Comment": "Pre-registered so a fresh checkout does not have to fill this in by hand. Read once, on pgAdmin's first run. Host and port are the Compose network's, not the host's — pgAdmin connects as a container, so localhost would be itself. If POSTGRES_USER or POSTGRES_DB differ from the development defaults, correct the connection in the UI."
+		}
+	}
+}

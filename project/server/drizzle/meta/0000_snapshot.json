@@ -1,5 +1,5 @@
 {
-  "id": "8b89babe-75f0-48ab-916f-2d12cee8bcb3",
+  "id": "5acc27aa-da5c-4678-a7f5-0d43273904d0",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -747,13 +747,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "kind": {
-          "name": "kind",
-          "type": "proposal_kind",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
         "status": {
           "name": "status",
           "type": "proposal_status",
@@ -906,10 +899,6 @@
         "proposal_rejection_documented": {
           "name": "proposal_rejection_documented",
           "value": "(\"proposal\".\"status\" <> 'rejected') OR (\"proposal\".\"rejection_reason\" IS NOT NULL AND \"proposal\".\"moderator_id\" IS NOT NULL)"
-        },
-        "proposal_based_on_matches_kind": {
-          "name": "proposal_based_on_matches_kind",
-          "value": "(\"proposal\".\"kind\" = 'create') = (\"proposal\".\"based_on_version\" IS NULL)"
         }
       },
       "isRLSEnabled": false
@@ -1060,14 +1049,6 @@
         "story",
         "relationship",
         "source"
-      ]
-    },
-    "public.proposal_kind": {
-      "name": "proposal_kind",
-      "schema": "public",
-      "values": [
-        "create",
-        "edit"
       ]
     },
     "public.proposal_status": {

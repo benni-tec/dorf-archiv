@@ -37,9 +37,6 @@ export const dateGranularity = pgEnum("date_granularity", [
 	"decade",
 ]);
 
-/** Whether a proposal introduces an entity or changes an existing one (PLAN.md §2.2). */
-export const proposalKind = pgEnum("proposal_kind", ["create", "edit"]);
-
 /**
  * Proposals are **never deleted** — a rejected one persists with its reason and the
  * moderator who rejected it (PLAN.md §2.2).

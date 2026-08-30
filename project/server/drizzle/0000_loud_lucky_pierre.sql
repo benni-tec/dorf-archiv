@@ -1,6 +1,5 @@
 CREATE TYPE "public"."date_granularity" AS ENUM('day', 'month', 'year', 'decade');--> statement-breakpoint
 CREATE TYPE "public"."entity_type" AS ENUM('user', 'thread', 'comment', 'tag', 'terms', 'person', 'place', 'media', 'story', 'relationship', 'source');--> statement-breakpoint
-CREATE TYPE "public"."proposal_kind" AS ENUM('create', 'edit');--> statement-breakpoint
 CREATE TYPE "public"."proposal_status" AS ENUM('pending', 'accepted', 'rejected');--> statement-breakpoint
 CREATE TABLE "entity" (
 	"id" uuid PRIMARY KEY DEFAULT uuidv7() NOT NULL,
@@ -66,7 +65,6 @@ CREATE TABLE "person_content" (
 CREATE TABLE "proposal" (
 	"id" uuid PRIMARY KEY DEFAULT uuidv7() NOT NULL,
 	"entity_id" uuid NOT NULL,
-	"kind" "proposal_kind" NOT NULL,
 	"status" "proposal_status" DEFAULT 'pending' NOT NULL,
 	"based_on_version" integer,
 	"rejection_reason" text,
@@ -76,8 +74,7 @@ CREATE TABLE "proposal" (
 	"created_by" uuid NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_by" uuid NOT NULL,
-	CONSTRAINT "proposal_rejection_documented" CHECK (("proposal"."status" <> 'rejected') OR ("proposal"."rejection_reason" IS NOT NULL AND "proposal"."moderator_id" IS NOT NULL)),
-	CONSTRAINT "proposal_based_on_matches_kind" CHECK (("proposal"."kind" = 'create') = ("proposal"."based_on_version" IS NULL))
+	CONSTRAINT "proposal_rejection_documented" CHECK (("proposal"."status" <> 'rejected') OR ("proposal"."rejection_reason" IS NOT NULL AND "proposal"."moderator_id" IS NOT NULL))
 );
 --> statement-breakpoint
 CREATE TABLE "user" (

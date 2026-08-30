@@ -1040,9 +1040,12 @@ For this data that is already public in `created_at`.)
 | `thread` | `entity_id`, target entity, `on_version` — the version the discussion is about |
 | `comment` | `entity_id`, `thread_id`, body, moderation status — an entity, ordered by its UUIDv7 `id` |
 | `entity_version` | `(entity_id, version)`, `published_at`, `published_by`, `redaction_reason` |
-| `proposal` | `id`, `entity_id`, `kind` (create/edit), `status`, `rejection_reason`, `moderator_id`, `based_on_version`, `terms_version` |
+| `proposal` | `id`, `entity_id`, `status`, `rejection_reason`, `moderator_id`, `based_on_version`, `terms_version` |
 
-Type is **not** duplicated onto `proposal` — it's one join to `entity`.
+Type is **not** duplicated onto `proposal` — it's one join to `entity`. Nor is a
+create/edit `kind`: `based_on_version IS NULL` already *is* that distinction, since a
+create is based on nothing, and storing it twice only buys a constraint to keep the two
+in step.
 
 **The five conceptual layers do not each become a table.** Taken literally, loading a
 Person would be `entity ⋈ versioned_entity ⋈ localized_entity ⋈ historic_entity ⋈ person ⋈

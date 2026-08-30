@@ -12,7 +12,7 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { primaryKeyColumn } from "./columns";
-import { entityType, proposalKind, proposalStatus } from "./enums";
+import { entityType, proposalStatus } from "./enums";
 
 /**
  * The entity spine — PLAN.md §2.1, §2.2 and §5.2.
@@ -187,15 +187,20 @@ export const proposal = pgTable(
 			.notNull()
 			.references(() => entity.id),
 
-		kind: proposalKind().notNull(),
 		status: proposalStatus().notNull().default("pending"),
 
 		/**
-		 * The version the proposer was working from. The moderation UI must flag a proposal
-		 * whose `basedOnVersion` is no longer the head and show both diffs — otherwise
-		 * publishing a stale proposal silently reverts whatever landed in between (§2.2a).
+		 * The version the proposer was working from, and **null when the proposal introduces
+		 * a new entity** — a create is based on nothing.
 		 *
-		 * Null for a `create`, which is based on nothing.
+		 * That absence is the only record of which kind of proposal this is. A `kind`
+		 * column would say the same thing twice and need a constraint to keep the two
+		 * honest, so there isn't one; a caller wanting the distinction asks whether this is
+		 * null. The moderation UI uses it to decide whether there is a diff to show at all.
+		 *
+		 * The UI must also flag a proposal whose `basedOnVersion` is no longer the head and
+		 * show both diffs — otherwise publishing a stale proposal silently reverts whatever
+		 * landed in between (§2.2a).
 		 */
 		basedOnVersion: integer(),
 
@@ -216,11 +221,6 @@ export const proposal = pgTable(
 		check(
 			"proposal_rejection_documented",
 			sql`(${table.status} <> 'rejected') OR (${table.rejectionReason} IS NOT NULL AND ${table.moderatorId} IS NOT NULL)`,
-		),
-		// A create proposal is based on nothing; an edit is always based on some version.
-		check(
-			"proposal_based_on_matches_kind",
-			sql`(${table.kind} = 'create') = (${table.basedOnVersion} IS NULL)`,
 		),
 	],
 );
