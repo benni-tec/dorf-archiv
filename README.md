@@ -51,9 +51,8 @@ project/
                        pre-registered connection to it
   Dockerfile           the reverse proxy that fronts the stack
   nginx.conf           its whole configuration — vhosts and the TCP stream
-  compose.infra.yml    backing services — what development runs against
-  compose.app.yml      the app and client services
-  compose.yml          both of the above, via `include:`
+  compose.dev.yml      backing services on localhost — what development runs against
+  compose.yml          the whole stack, publishing nothing but the proxy
   tsconfig.json        the base config the three workspaces extend
   .env                 the one configuration file, for the server and Compose alike
 ```
@@ -74,7 +73,7 @@ the repository scripts under `scripts/` are written against Bun's own APIs, not 
 ```bash
 cp project/.env.example project/.env   # optional — every value has a working default
 bun install            # also prebuilds shared + server (see note below)
-bun run dev:infra       # Postgres, MinIO and pgAdmin, torn down when you stop it
+bun run dev:infra       # Postgres, MinIO and pgAdmin on localhost, torn down on exit
 bun run dev            # client on :5173, server on :3000
 ```
 
@@ -137,21 +136,19 @@ connection strings, so three shapes work from the same source:
    | --- | --- |
    | `<host>` | the client |
    | `api.<host>` | the API |
-   | `admin.db.<host>` | pgAdmin |
-   | `<host>:<db-port>` | Postgres |
+   | `db.<host>` | pgAdmin |
 
-   `<host>` is `PROXY_HOST`. Each name is assembled in `compose.app.yml` from it, the way
-   the database URL is assembled from its parts, so any one of them can be moved to an
-   unrelated domain with `PROXY_CLIENT_HOST`, `PROXY_API_HOST` or `PROXY_ADMIN_HOST`.
+   `<host>` is `PROXY_HOST`. Each name is assembled in `compose.yml` from it, the way the
+   database URL is assembled from its parts, so any one of them can be moved to an unrelated
+   domain with `PROXY_CLIENT_HOST`, `PROXY_API_HOST` or `PROXY_DB_HOST`.
 
-   Postgres gets a **port rather than a hostname** because its wire protocol carries nothing
-   to route on — no Host header, and no TLS handshake for nginx to read a name out of. See
-   the `stream` block at the foot of `project/nginx.conf`.
+   **The database is not routed through the proxy, and nothing but the proxy is published.**
+   Postgres, MinIO and pgAdmin are reachable only over the Compose network; a human inspects
+   the database through pgAdmin on `db.<host>`. Development is the opposite — see below.
 
-   The proxy is part of the *infrastructure*, so `dev:infra` starts it too. The client and
-   API routes answer 502 there until the application containers exist, which is deliberate:
-   its upstreams are resolved per request rather than at start-up, so a missing one is a bad
-   response rather than a proxy that will not boot.
+   The proxy's upstreams are resolved per request rather than at start-up, so it comes up
+   whether or not the services behind it exist and stays up while one restarts; a missing
+   one answers 502.
 
    The client's API URL is baked into its bundle at build time, so it follows the proxy's
    names and a change of hostname means rebuilding that image.

@@ -643,7 +643,7 @@ Bun workspaces + Turbo, as today. Responsibilities:
 | `shared/` | Cross-boundary types; the **content module** (below); rough-date construction, validation and formatting; permission definitions |
 | `server/` | Hono API, domain layer, Drizzle schema + migrations, auth, moderation, search, translation, image derivatives, S3 access |
 | `client/` | Vite + React 19 SPA — TanStack Router/Query, Tailwind v4, shadcn/ui, MapLibre, TipTap |
-| `project/` | Contains the three workspaces above, the Compose files (`compose.infra.yml`, `compose.app.yml`, `compose.yml`), the `postgres/` image, and a `Dockerfile` in each of `server/` and `client/` |
+| `project/` | Contains the three workspaces above, the two Compose files (`compose.dev.yml`, `compose.yml`), the `postgres/` image, the reverse proxy (`Dockerfile` + `nginx.conf`), and a `Dockerfile` in each of `server/` and `client/` |
 
 **The content module is one module, not a parser and a serializer.** The mdast AST is the
 canonical representation; directive-Markdown and TipTap's document are both *projections*
@@ -705,13 +705,21 @@ can reasonably satisfy it:
 | S3-compatible object storage | **Required** — the API, not a particular provider |
 | Hunspell `de_DE` in `$SHAREDIR/tsearch_data/` | **Optional** — many managed hosts structurally cannot allow it, so search degrades instead (§4.3) |
 
-**Two separate Compose files, no profiles.**
+**Two separate Compose files, no profiles, and neither includes the other.**
 
-- `project/compose.infra.yml` — Postgres, MinIO, bucket initialisation. Standalone and
-  self-sufficient; this is what development runs.
-- `project/compose.yml` — the full stack. Pulls the dependencies in with Compose's
-  `include:` rather than restating them, so the two files can't drift. (If the installed
-  Compose predates `include:`, the equivalent is `-f compose.infra.yml -f compose.app.yml`.)
+- `project/compose.dev.yml` — Postgres, MinIO, bucket initialisation, pgAdmin, **every
+  one of them published on loopback**. This is what development runs against, with the
+  client and server from source on the host.
+- `project/compose.yml` — the full stack, application and proxy included, **publishing
+  nothing but the proxy**. The database has no route through it at all; a human reaches
+  it through pgAdmin on `db.<host>`.
+
+These were briefly written as one file including the other, which is the obvious way to
+stop them drifting. It does not work here: an including file can *add* a published port
+but cannot take one away, and which ports exist is precisely what separates the two
+stacks. Development needs `localhost:5432`, because the server and the migrations run
+from the host; a deployment must not have it at all. So the backing services are written
+out twice, and a change to one usually belongs in both.
 
 Wrapped in root scripts so nobody types paths:
 

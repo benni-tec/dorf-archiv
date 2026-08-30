@@ -1,0 +1,121 @@
+# Backing services for development — PLAN.md §4.1 shape 1. Brought up by `bun run dev:infra`.
+#
+# The client and server run **from source on the host**, so this file's whole job is to put
+# the things they talk to on localhost. That is the one real difference from `compose.yml`,
+# and it is why the two are written out separately rather than one including the other: an
+# including file can add a published port but cannot take one away.
+#
+# So: **every backing service is published here, and none of them are in `compose.yml`.**
+# Development needs `localhost:5432` for the server and for `bun run db:migrate`, which the
+# plan has running from the host and never from inside a container. A deployment needs the
+# opposite — the proxy is its only way in, and the database has no route through it.
+#
+# The application, the client and the proxy are deliberately absent. In development they are
+# not containers: the client is on :5173 and the server on :3000, from source, with hot
+# reload. There is nothing for a proxy to sit in front of.
+#
+# Volumes are named and shared with `compose.yml` — the project name is the same, so the two
+# stacks see the same database. Teardown is `down`, never `down -v`.
+
+name: dorf-archiv
+
+services:
+  postgres:
+    build:
+      context: postgres
+    image: dorf-archiv/postgres:18-hunspell
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dorf}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dorf}
+      POSTGRES_DB: ${POSTGRES_DB:-dorf_archiv}
+    ports:
+      # Loopback by default: published so the host can reach it, not so the network can.
+      - "${BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      # postgres:18 moved PGDATA to /var/lib/postgresql/<major>/docker, so the volume belongs
+      # one level up. Mounting .../data here would leave the database in the container's
+      # writable layer and lose it on recreate.
+      - postgres-data:/var/lib/postgresql
+      - ./postgres/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-dorf}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-dorf-dev-secret}
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${S3_PORT:-9000}:9000"
+      - "${BIND_ADDRESS:-127.0.0.1}:${S3_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+
+  # One-shot bucket creation, so a first run never means clicking through the MinIO console.
+  # It retries rather than depending on a healthcheck, because the MinIO image carries no
+  # reliable in-container probe.
+  minio-init:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    depends_on:
+      minio:
+        condition: service_started
+    environment:
+      S3_BUCKET: ${S3_BUCKET:-dorf-archiv}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-dorf}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-dorf-dev-secret}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        for attempt in $$(seq 1 30); do
+          if mc alias set local http://minio:9000 "$$S3_ACCESS_KEY_ID" "$$S3_SECRET_ACCESS_KEY" >/dev/null 2>&1; then
+            break
+          fi
+          echo "waiting for minio ($$attempt/30)"
+          sleep 2
+        done
+        mc alias set local http://minio:9000 "$$S3_ACCESS_KEY_ID" "$$S3_SECRET_ACCESS_KEY"
+        mc mb --ignore-existing "local/$$S3_BUCKET"
+        # PLAN.md §4.6 #3: unpublished blobs sit in storage from the moment of upload, so a
+        # public bucket policy would bypass moderation entirely. Files reach browsers only
+        # through short-lived presigned URLs the backend issues after a permission check.
+        mc anonymous set none "local/$$S3_BUCKET"
+        echo "bucket $$S3_BUCKET ready (private)"
+
+  # A database console, so inspecting a row does not mean remembering psql flags. Reached
+  # directly at http://localhost:5050 here — there is no proxy in development to put it
+  # behind, which is also why the PGADMIN_CONFIG_PROXY_X_* counts that `compose.yml` sets are
+  # absent: trusting a forwarded header when nothing in front is setting it lets a client
+  # spoof it.
+  pgadmin:
+    image: dpage/pgadmin4:9.17
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@dorf-archiv.test}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-dorf-dev-secret}
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+      # `.test` is the TLD reserved for exactly this, so the default login can never be a
+      # real address — but pgAdmin rejects reserved TLDs until they are allowed explicitly.
+      # The value is a Python list literal, which is what pgAdmin parses this into.
+      PGADMIN_CONFIG_ALLOW_SPECIAL_EMAIL_DOMAINS: "['test', 'local', 'localhost', 'invalid']"
+      PGADMIN_SERVER_JSON_FILE: /pgadmin4/servers.json
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${PGADMIN_PORT:-5050}:80"
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+      - ./postgres/servers.json:/pgadmin4/servers.json:ro
+
+volumes:
+  postgres-data:
+  minio-data:
+  pgadmin-data:

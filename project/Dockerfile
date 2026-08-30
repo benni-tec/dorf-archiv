@@ -2,11 +2,12 @@
 #
 # Routes by hostname, all on the port the proxy is published on:
 #
-#   <host>            the client
-#   api.<host>        the API
-#   admin.db.<host>   pgAdmin
+#   <host>       the client
+#   api.<host>   the API
+#   db.<host>    pgAdmin
 #
-# and Postgres on its own port, because TCP has no hostname to route on — see nginx.conf.
+# The database itself is not proxied. It stays on its own loopback-bound port, which is what
+# the server running from source and `bun run db:migrate` connect to — see nginx.conf.
 #
 # The names are not baked in: they arrive as environment variables and are substituted into
 # the configuration at container start, so the same image serves localhost in development
@@ -29,7 +30,6 @@ ENV NGINX_ENVSUBST_FILTER=^PROXY_
 # Defaults that make the image runnable on its own; compose supplies the real names.
 ENV PROXY_CLIENT_HOST=localhost
 ENV PROXY_API_HOST=api.localhost
-ENV PROXY_ADMIN_HOST=admin.db.localhost
+ENV PROXY_DB_HOST=db.localhost
 
 EXPOSE 80
-EXPOSE 5432

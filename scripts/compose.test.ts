@@ -6,13 +6,13 @@ import {
 } from "./compose";
 
 describe("buildComposeArgs", () => {
-	test("targets the dependencies-only file for the infra stack", () => {
-		const args = buildComposeArgs("infra", ["up", "-d"], { envFile: null });
+	test("targets the dependencies-only file for the dev stack", () => {
+		const args = buildComposeArgs("dev", ["up", "-d"], { envFile: null });
 
 		expect(args).toEqual([
 			"compose",
 			"--file",
-			"project/compose.infra.yml",
+			"project/compose.dev.yml",
 			"up",
 			"-d",
 		]);
@@ -25,21 +25,21 @@ describe("buildComposeArgs", () => {
 	});
 
 	test("passes an env file through when there is one", () => {
-		const args = buildComposeArgs("infra", ["up"], { envFile: "/repo/.env" });
+		const args = buildComposeArgs("dev", ["up"], { envFile: "/repo/.env" });
 
 		expect(args.join(" ")).toContain("--env-file /repo/.env");
 	});
 
 	test("omits --env-file entirely when there is none, rather than pointing at a missing path", () => {
-		const args = buildComposeArgs("infra", ["up"], { envFile: null });
+		const args = buildComposeArgs("dev", ["up"], { envFile: null });
 
 		expect(args).not.toContain("--env-file");
 	});
 
 	test("keeps the compose file ahead of the subcommand", () => {
-		const args = buildComposeArgs("infra", ["up"], { envFile: "/repo/.env" });
+		const args = buildComposeArgs("dev", ["up"], { envFile: "/repo/.env" });
 
-		expect(args.indexOf("project/compose.infra.yml")).toBeLessThan(
+		expect(args.indexOf("project/compose.dev.yml")).toBeLessThan(
 			args.indexOf("up"),
 		);
 	});

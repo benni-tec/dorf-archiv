@@ -7,15 +7,15 @@
  * else works. Bun is a hard requirement for the repository, so this uses Bun's own APIs
  * rather than the Node compatibility layer.
  *
- * Usage: bun scripts/compose.ts <infra|full> <...docker compose arguments>
+ * Usage: bun scripts/compose.ts <dev|full> <...docker compose arguments>
  */
 
-export type Stack = "infra" | "full";
+export type Stack = "dev" | "full";
 
 const COMPOSE_FILES: Record<Stack, string> = {
-	/** Backing services only — what development runs against source on the host. */
-	infra: "project/compose.infra.yml",
-	/** The whole stack, application and client included. */
+	/** Backing services only, each published — what development runs against from source. */
+	dev: "project/compose.dev.yml",
+	/** The whole stack, with the proxy as its only published port. */
 	full: "project/compose.yml",
 };
 
@@ -104,7 +104,7 @@ export async function spawnCompose(stack: Stack, args: string[]) {
 }
 
 function isStack(value: string | undefined): value is Stack {
-	return value === "infra" || value === "full";
+	return value === "dev" || value === "full";
 }
 
 if (import.meta.main) {
@@ -112,7 +112,7 @@ if (import.meta.main) {
 
 	if (!isStack(stack)) {
 		console.error(
-			"Usage: bun scripts/compose.ts <infra|full> <...compose arguments>",
+			"Usage: bun scripts/compose.ts <dev|full> <...compose arguments>",
 		);
 		process.exit(2);
 	}
