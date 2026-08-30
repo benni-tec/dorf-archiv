@@ -12,7 +12,8 @@
 
 A website where local people upload photos and stories about the people and places of
 their village, to preserve its history. Community-contributed, publicly readable,
-**moderated before anything goes live**, and **used mostly from phones**.
+**moderated before anything goes live**, and used from phones *and* desktops in roughly
+equal measure — but for different things.
 
 The centrepiece is an **interactive map tied to a timeline**: tap a spot to see what has
 been contributed there, or tap a spot to contribute. Around it sit the records
@@ -20,8 +21,13 @@ themselves — photos, stories, people, places — and later an ancestry view.
 
 Four properties shape almost everything below:
 
-- **Mobile-first, not mobile-adapted.** Contributors are standing in the village with a
-  phone, or at the kitchen table photographing an album. Design the small screen first.
+- **Contributing is phone-shaped; viewing is desktop-shaped.** Someone stands in the
+  village with a phone, or sits at the kitchen table photographing an album — but the
+  person browsing old photographs of their street, reading an entry with its sources, or
+  working through a family tree is far more likely at a desk. Neither is the primary
+  screen. Design each surface for where it is actually used, and support both properly:
+  a desktop layout mechanically derived from a phone one wastes the screen on exactly the
+  pages people linger on.
 - **Contributors are not archivists.** Nobody knows the exact date of grandma's photo.
   Everything dated accepts "roughly" as an answer.
 - **Nothing is published unmoderated.** Every contribution is a *proposal* until a
@@ -39,34 +45,86 @@ archive, digitised by the team before public launch — an empty map is a dead s
 
 ### 2.1 The entity hierarchy
 
-Everything publishable descends from `VersionedEntity`, which owns versioning and the
-propose/publish workflow. `HistoricEntity` adds the archival apparatus — links, sources,
-comments — on top.
+Four layers, each adding exactly one capability:
+
+- **`Entity`** — identity, the type discriminator, and the audit quartet
+  (`created_at`/`created_by`/`updated_at`/`updated_by`) that §2.2a requires everywhere.
+  `User` and `Comment` descend from it directly: both have identity and an audit trail,
+  neither has versions.
+- **`VersionedEntity`** — versioning and the propose/publish workflow. Everything
+  publishable descends from it.
+- **`LocalizedEntity`** — an original language and per-language content rows.
+- **`HistoricEntity`** — the archival apparatus: links, sources, comments.
 
 ```mermaid
 classDiagram
+    direction TD
+
+    class Entity {
+        +UUIDv7 id
+        +EntityType type
+        +Timestamp created_at
+        +UserId created_by
+        +Timestamp updated_at
+        +UserId updated_by
+    }
+    class User {
+        +Email email
+        +string alias
+        +bool emailVerified
+        +bool approved
+    }
+    class Thread
     class VersionedEntity {
-        id
-        type
-        originalLanguage
-        publishedVersion
+        +int version
     }
-    class LocalizedContent {
-        language
-        name
-        abstract
-        description
+    class LocalizedEntity {
+        +Language originalLanguage
     }
-    class HistoricEntity {
-        links
-        sources
-        comments
+    class HistoricEntity
+
+    class Person {
+        +Date born
+        +Date died
+    }
+    class Place {
+        +Point point
+        +GeoJson area
+        +Date validFrom
+        +Date validUntil
+    }
+    class Media {
+        +Date captured
+        +Point coordinates
+    }
+    class Story {
+        +DateOrInterval occurred
+    }
+    class Relationship {
+        +RelationshipKind kind
+        +bool directed
+        +Date start
+        +Date end
+    }
+    class Source {
+        +string identifier
+        +DateOrInterval published
+    }
+    class Tag {
+        +string slug
+    }
+    class TermsAndConditions {
+        +CalendarDate effectiveFrom
     }
 
-    VersionedEntity "1" *-- "1..n" LocalizedContent
-    VersionedEntity <|-- HistoricEntity
-    VersionedEntity <|-- Tag
-    VersionedEntity <|-- TermsAndConditions
+    Entity <|-- User
+    Entity <|-- Thread
+    Entity <|-- VersionedEntity
+    VersionedEntity <|-- LocalizedEntity
+
+    LocalizedEntity <|-- HistoricEntity
+    LocalizedEntity <|-- Tag
+    LocalizedEntity <|-- TermsAndConditions
 
     HistoricEntity <|-- Person
     HistoricEntity <|-- Place
@@ -75,14 +133,118 @@ classDiagram
     HistoricEntity <|-- Relationship
     HistoricEntity <|-- Source
 
-    Relationship --> Person : partners / child
+    class PersonContent {
+        +Language language
+        +string name
+        +string abstract
+        +Markdown description
+    }
+    class PlaceContent {
+        +Language language
+        +string name
+        +string abstract
+        +Markdown description
+    }
+    class MediaContent {
+        +Language language
+        +string name
+        +string abstract
+        +Markdown description
+        +string caption
+    }
+    class StoryContent {
+        +Language language
+        +string name
+        +string abstract
+        +Markdown body
+    }
+    class RelationshipContent {
+        +Language language
+        +string name
+        +string abstract
+        +Markdown description
+    }
+    class SourceContent {
+        +Language language
+        +string name
+        +string abstract
+        +Markdown citation
+    }
+    class TagContent {
+        +Language language
+        +string name
+        +string abstract
+    }
+    class TermsContent {
+        +Language language
+        +string name
+        +string abstract
+        +Markdown body
+    }
+
+    Person "1" *-- "1..n" PersonContent
+    Place "1" *-- "1..n" PlaceContent
+    Media "1" *-- "1..n" MediaContent
+    Story "1" *-- "1..n" StoryContent
+    Relationship "1" *-- "1..n" RelationshipContent
+    Source "1" *-- "1..n" SourceContent
+    Tag "1" *-- "1..n" TagContent
+    TermsAndConditions "1" *-- "1..n" TermsContent
+
+    class Link
+    class Citation {
+        +string locator
+    }
+    class Comment {
+        +UUIDv7 id
+        +int on_version
+        +Markdown body
+        +ModerationState status
+    }
+    class MediaFile {
+        +MediaRole role
+        +bool primary
+        +int sort
+    }
+    class Asset {
+        +string storageKey
+        +string sha256
+        +string mime
+        +int bytes
+        +int width
+        +int height
+    }
+
+    HistoricEntity "1" *-- "0..n" Link : links
+    Link --> HistoricEntity : target
+    HistoricEntity "1" *-- "0..n" Citation : sources
+    Citation --> Source : cites
+    HistoricEntity "1" *-- "0..n" Thread : threads
+    Thread "1" *-- "1..n" Comment : ordered by id
+
+    Relationship "1" --> "2" Person : connects
     Media --> Place : located at
-    Place "1" *-- "0..n" MediaFile
+    Media "1" *-- "1..n" MediaFile
+    MediaFile --> Asset : references
+    User "0..1" --> "0..1" Person : is
 ```
 
+**Every subtype is an `X` / `XContent` pair**: `X` holds what does not vary by language,
+`XContent` holds what does, one row per language.
+
+Only the *distinctive* content fields are drawn. Every `XContent` additionally carries
+`language`, `name` and `abstract` by convention (§2.4) — and `description` wherever the
+type has no more specific long-text field, which is why `StoryContent` and `TermsContent`
+show `body` and `MediaContent` shows `caption` instead. `TagContent` is a label: `name`
+only.
+
+`MediaFile` is a per-version reference; `Asset` is the immutable stored blob. Adding or
+re-cropping a file produces a new version pointing at different assets, never a mutation of
+bytes already written (§2.7).
+
 Stored as **table-per-type** with a discriminator on the entity table only. Loading a
-Person is `entity ⋈ historic_entity ⋈ person_content`; three joins, real foreign keys,
-no polymorphic columns.
+Person is `entity ⋈ historic_entity ⋈ person`, plus `person_content` for the requested
+language; real foreign keys, no polymorphic columns.
 
 **Why `Tag` and `TermsAndConditions` sit beside `HistoricEntity` rather than under it:**
 a tag is vocabulary and the ToC is a legal document. Neither is an assertion about the
@@ -90,8 +252,14 @@ past, so neither needs sources or citations — but both need propose/publish an
 history, which is exactly what `VersionedEntity` provides.
 
 **Why `Relationship` is an entity:** "Josef married Anna in 1893" is a claim, and claims
-need a source, a fuzzy date, a confidence and somewhere to argue about them. A plain join
+need a source, a rough date, a confidence and somewhere to argue about them. A plain join
 row can carry none of that. Unions and parentage are therefore first-class entities.
+
+A `Relationship` connects **exactly two `Person`s** — it is what the ancestry graph is
+drawn from, and nothing else belongs in that graph. `directed` distinguishes the two
+shapes: `married` is commutative and reads the same from either end, `child` is not.
+`start` and `end` are both optional rough dates, so a marriage can record when it began,
+when it ended, either, or neither.
 
 ### 2.2 Versions and proposals
 
@@ -125,10 +293,11 @@ Consequences:
   a query.
 - Proposals are **never deleted** — rejected ones persist with a reason and a moderator.
 - A proposer sees their own pending proposal, marked as such.
-- **A query that forgets `proposal_id IS NULL` silently returns version 4 several times
-  over.** This is the one footgun in the model; it wants a default-scoped query helper,
-  not discipline at each call site. Public reads get a partial index
-  (`WHERE proposal_id IS NULL`).
+- **A query that forgets `proposal_id IS NULL` returns proposals to the public** — that is,
+  it publishes unmoderated content, and also duplicates version 4 once per incorporated
+  proposal. The guards are in §4.6 #1: base tables are read only inside the repository, the
+  row→domain mapper asserts, and a registry-driven conformance test proves it per entity
+  type. Public reads get a partial index (`WHERE proposal_id IS NULL`).
 
 ### 2.2a Audit and mutability
 
@@ -175,10 +344,24 @@ its own gate.
 
 - Languages are **peers** for authoring: name, abstract, description and captions can be
   written in several.
-- One language is flagged **original** on the entity. It is the source for
+- One language is flagged **original** on the `LocalizedEntity`. It is the source for
   auto-translation and the fallback for display.
-- Non-translatable fields stay on the entity/subtype; **all language-dependent fields
-  live in `LocalizedContent` sub-entities**, one per language.
+- Non-translatable fields stay on the subtype; **all language-dependent fields live in a
+  per-type content companion**, one row per language: `Place`/`PlaceContent`,
+  `Person`/`PersonContent`, and so on.
+
+  There is deliberately **no single shared `LocalizedContent`**. Types need genuinely
+  different translatable fields — Media has a *caption*, Story a *body* rather than a
+  description, Source its citation text, Tag only a *label* — and forcing all of them
+  through one `name`/`abstract`/`description` row means columns that are always null for
+  half the types and no home for the fields that don't fit.
+
+  The cost is that the uniform parts of the system — the preview projection (§4.4), the
+  detail page, search — need *some* fields to be present everywhere. That is handled by
+  **convention rather than inheritance**: every `XContent` carries `name` and `abstract`,
+  and the entity registry (§4.6 #5) enforces it in a test. A shared base table would give
+  that structurally, but at the price of a fifth join on every read and empty rows for
+  types that don't want the extra fields.
 - **A version snapshots all languages together.** A version is "the complete state of this
   record at time T", which is what you cite. A French typo fix bumps the version the
   German shares; the diff view makes it obvious what actually moved.
@@ -186,19 +369,160 @@ its own gate.
   `(entity, field, target language, hash of the original text)`. Hashing rather than
   version-counting means an edit to the original silently retires everything derived from
   it, with no bookkeeping.
+- Translation is **one module with a provider adapter behind it** —
+  `translate(entity, field, targetLanguage, actor)` handles cache lookup, source selection,
+  directive protection, the provider call and labelling. The provider is a genuine seam
+  rather than a hypothetical one: DeepL, eTranslation and a self-hosted model are all live
+  candidates (§9), so something really does vary across it.
 - Machine output is **visibly labelled** ("Automatisch übersetzt") with the original one
   click away, and never enters the moderation queue as though a human wrote it. In an
   archive people cite, an unreviewed MT artefact becomes a "fact".
 - A cache miss renders the available language immediately with a pending marker and fills
   in on the next load — never a blocking API call during a page render.
 
-### 2.5 Fuzzy dates
+### 2.5 Dates
 
-Every dated thing carries `date_start`, `date_end` and a **precision enum**
-(`day` / `month` / `year` / `decade` / `range` / `unknown`). One shape covers "1928",
-"um 1930", "1920–1935" and "no idea"; it renders as German prose; and the timeline filter
-becomes an indexable **overlap** query rather than an equality test. The upload UI offers
-decade buttons, not a date picker.
+**A date is an anchor plus a granularity**: `day`, `month`, `year` or `decade`. "Specific"
+is not a separate kind — it is simply `day` granularity, so there is one concept rather
+than two with a flag between them. Every rough date therefore *denotes a span*: `1920s` is
+1920-01-01 … 1929-12-31, `März 1920` is that month, `14. März 1920` is that day.
+
+**An interval is two rough dates**, each with its own granularity — so "from the 1920s
+until March 1931" is expressible, which a single shared precision value cannot do. A single
+date is an interval with no end. An unknown date is absent entirely.
+
+That replaces the earlier single enum (`day`/`month`/`year`/`decade`/`range`/`unknown`),
+which conflated three different things: granularity, whether there are one or two
+endpoints, and whether a date exists at all. Only the first is a property of a date.
+
+**Rough boundaries must not overlap.** "From the 1920s to 1925" is not a wide interval, it
+is a contradiction: the start's span already contains the end. So the rule is that the
+start's span must end at or before the end's span begins. Adjacent spans are fine (1920s →
+1930s); a start and end resolving to the same span is rejected, because "1920 to 1920" is a
+single rough date rather than an interval and should be stored as one.
+
+#### Three embedded types
+
+`RoughDate` is the primitive — a `daterange` plus a granularity, two columns. On top of it
+sit three **embedded value types**. None is a table; each inlines its columns into whatever
+row uses it, named by prefix.
+
+| Type | Shape | Meaning |
+| --- | --- | --- |
+| **`Date`** | one `RoughDate`, required | a single point-or-span |
+| **`DateOrInterval`** | start required, end optional | one set ⇒ a date; both set ⇒ an interval |
+| **`Interval`** | both required | genuinely spans a period |
+
+> **Naming, because "date" is overloaded.** Throughout this document and the codebase,
+> **`Date` always means a `RoughDate`** — an anchor plus a granularity, denoting a span.
+> An exact calendar date is **`CalendarDate`** (a plain SQL `date`), used only where the
+> value is administrative rather than archival: the ToC's `effectiveFrom`. Audit columns
+> are `timestamptz` and are neither.
+
+Storage, using Postgres range types — available now that we're not on SQLite:
+
+```sql
+-- DateOrInterval, non-nullable
+<field>_start              daterange        NOT NULL
+<field>_start_granularity  date_granularity NOT NULL
+<field>_end                daterange              -- NULL ⇒ a Date, not an Interval
+<field>_end_granularity    date_granularity
+<field>_extent             daterange GENERATED    -- hull, GiST-indexed for the timeline
+
+CHECK (<field>_end IS NULL OR upper(<field>_start) <= lower(<field>_end))
+```
+
+`Date` drops the `_end` columns. `Interval` makes them `NOT NULL`.
+
+**Nullable embedding.** When a `DateOrInterval` is optional, `_start` becomes nullable and
+*both* columns null means the whole value is absent. An end without a start is not "an
+open-ended interval", it is a corrupt row, so it needs its own constraint:
+
+```sql
+CHECK (<field>_start IS NOT NULL OR <field>_end IS NULL)
+```
+
+Without that, a partially-written row is indistinguishable from a deliberate one, and the
+extent silently computes from a null start.
+
+The constraint expresses ordering *and* non-overlap in one expression, and it is enforced
+by the database rather than by whichever code path happens to write the row — which
+matters, since these dates arrive from the upload form, the moderation UI and any future
+import alike.
+
+The generated `extent` is what the timeline filters on: a GiST-indexed `&&` overlap test
+against the selected window, which is both cheaper and more honest than comparing bare
+timestamps.
+
+#### Which type goes where
+
+| Field | Type | Why |
+| --- | --- | --- |
+| `Person.born` | `Date?` | a birth happens once; "1890er" is granularity, not an interval |
+| `Person.died` | `Date?` | one event; absence **means living** (see below), not unknown |
+| `Media.captured` | `Date?` | the shutter fired once |
+| `Story.occurred` | `DateOrInterval?` | frequently a span — "die Kriegsjahre" |
+| `Source.published` | `DateOrInterval?` | a church book covers 1850–1900; that is an interval, not a date |
+| `Relationship.start` / `.end` | `Date?` each | two independent moments, each optional |
+| `Place.validFrom` / `.validUntil` | `Date?` each | two independent optional dates, so "from 1850, still standing" and "until 1923, start unknown" are both expressible |
+| `TermsAndConditions.effectiveFrom` | `CalendarDate` (plain SQL `date`) | legal, exact, not rough at all — named apart from `Date` precisely because our `Date` *is* rough |
+| audit `created_at` etc. | `timestamptz` | system time, not archival time |
+
+**The rule: `Date` for things that happen once, `DateOrInterval` for things that can last.**
+A birth, a death, a shutter firing — each is one event, and "1890er" expresses *uncertainty
+about when*, which is granularity's job. A story about the war years, or a church book
+covering 1850–1900, genuinely occupies a stretch of time; that is what an interval is for.
+
+This also settles a confusion an interval would otherwise carry: `1890–1895` could mean
+"this lasted five years" or "this happened once, somewhere in there". Restricting intervals
+to things that can genuinely last removes the second reading entirely, so no disambiguating
+flag is needed.
+
+The cost is that an irregular uncertainty range — "born 1849 or 1850, from an age given in
+the 1893 census" — has no field of its own. That belongs in the description with its
+citation, which is the better home for a claim that needs reasoning attached. If it turns
+out to be common in the Feuerwehr corpus, widening a `Date` to a `DateOrInterval` is an
+additive migration, not a breaking one.
+
+**Why `Place` gets two loose dates rather than an interval type.** "From 1850, still
+standing" is not a `Date` (not a point), not an `Interval` (no end), and under
+`DateOrInterval` an absent end means *"this is a point"* — the opposite of what validity
+needs. Rather than add a fourth type whose absent end means *ongoing*, `Place` carries
+`validFrom` and `validUntil` as two independent optional `Date`s. That is strictly more
+expressive: all four states are distinguishable — unknown, open-ended, open-started, and
+closed — where an interval type would have collapsed two of them.
+
+Two consequences: the non-overlap `CHECK` still applies **between** the two fields when both
+are set, rather than inside one embedded value; and the timeline extent becomes a `daterange`
+with **infinite bounds** where an end is absent, which is exactly right for a building that
+is still there.
+
+**`Person.died` absent means living**, not "unknown". That is a deliberate assertion rather
+than a gap, and it makes the field authoritative instead of ambiguous — no separate
+`isAlive` flag that can disagree with the date.
+
+It also happens to fail in the safe direction for the living-person gating (§4.4): a person
+whose death simply hasn't been researched is treated as alive and therefore gated, so the
+error is over-protection, and the fix is data entry — which is work the archive wants doing
+anyway.
+
+**But the gating predicate needs a plausibility bound**, or a villager born in 1780 with no
+recorded death is "living" and gated forever. So:
+
+```
+possiblyLiving = died IS NULL AND (born IS NULL OR upper(born) > today - <lifespan>)
+```
+
+with the lifespan a setting rather than a constant (~120 years). Note that an unknown birth
+*and* an unknown death still resolves to gated, which is the conservative reading and the
+right one.
+
+**The UI must show roughness, never launder it.** A date entered as a decade renders
+"1920er", not "1920" — presenting a guess as a precise date is a small lie that an archive
+compounds over time. Intervals render each end at its own granularity: "1920er – März
+1931". Input offers a granularity selector (Tag / Monat / Jahr / Jahrzehnt) with a
+"Zeitraum" toggle to add the second endpoint, and leads with decade buttons rather than a
+date picker.
 
 ### 2.6 Links vs. sources
 
@@ -215,6 +539,26 @@ Two parallel, deliberately separate mechanisms, both rendered at the foot of an 
 
 People and places are **always referenced as links**, never as inline prose names, so the
 entity owns its own naming and translations.
+
+#### Structure of a link
+
+A `Link` is a **property of a `HistoricEntity`, versioned with its parent** — it carries
+`version`/`proposal_id` exactly like the rest of that entity's content, so an entity's link
+set is part of the state a version captures.
+
+It is deliberately **bare**: a pointer to another `HistoricEntity`, with no kind, no label
+and no description. Anything explanatory belongs in the entity's body, where it is prose
+that can be translated, sourced and argued with. **The link exists for SQL-based discovery
+only** — backlinks, "what references this", graph traversal — not for display semantics.
+
+**Every reference in the body must appear in the link set.** The content module guarantees
+that on save: parse each language's body, collect the directive targets, union them into
+the set. Links may also exist without appearing in any prose. Targets are deduplicated —
+mentioning a person three times, or in three languages, is one link.
+
+Keeping it this bare is what makes it useful. A link table with kinds and labels invites
+queries that need to interpret them; a set of `(entity, target)` pairs answers "what touches
+this" with an index scan and no semantics to get wrong.
 
 ### 2.7 Places, media and geometry
 
@@ -234,15 +578,58 @@ entity owns its own naming and translations.
   file produces a new version without mutating stored bytes. Originals are never
   overwritten.
 
-### 2.8 Comments
+### 2.8 Threads and comments
 
-Comments use propose/publish but are **not versioned** — a comment is an utterance, not a
-revision. Each records the entity version it was written against, so the UI can flag
-"this comment refers to an earlier version", which in an archive where facts get corrected
-is genuinely useful. A comment never bumps the entity's version. No editing: delete and
-repost.
+Discussion attaches to a `HistoricEntity` as **threads**, not as a flat comment list. A
+`Thread` is the `Entity` — it has identity, an audit trail and a subject — and it houses
+its `Comment`s **in creation order**. Several conversations can therefore run on one
+photograph ("who is second from the left" and "this is the old school, not the Rathaus")
+without collapsing into one undifferentiated pile.
+
+**Ordering is by id, not by a timestamp.** Since ids are UUIDv7 (§5.2) they are already
+time-ordered, so creation order *is* id order: no sort column to maintain, no tie-break
+needed when two replies land in the same millisecond, and a stable order that can't drift
+if a timestamp is ever corrected.
+
+Neither threads nor comments are **versioned** — an utterance is not a revision, and a
+comment never bumps the entity's version. Each comment records the entity version it was
+written against, so the UI can flag "this refers to an earlier version", which matters in
+an archive where facts get corrected. Moderation is **per comment**, not per thread: one
+bad reply shouldn't hide a useful conversation. No editing: delete and repost.
+
+The thread's own anchor is derived from its first comment rather than stored twice.
 
 ---
+
+### 2.9 Users and people
+
+A user account may be **linked to a Person entity** — "this account *is* that person".
+One account, at most one Person; one Person, at most one account. Both sides optional:
+most people in the archive are long dead, and plenty of contributors won't appear in it.
+
+**The link is confirmed by a moderator, never self-asserted.** Claiming to be someone in
+the archive is otherwise a route to gated data about them, and to influence over their
+record. This is a moderation action like any other, and the audit quartet records who
+confirmed it.
+
+Why it earns its place, beyond convenience:
+
+- **It is how a data-subject access request gets answered.** Under DSGVO Art. 15 a person
+  may ask what the archive holds about them. Without a link between the account and the
+  Person, answering means a manual search through free text; with it, the question is a
+  query. For a site holding records about identifiable living villagers, that matters.
+- A contributor's own entry, and their own family, become a natural entry point into the
+  ancestry view.
+
+**Not public by default.** The account model shows a chosen alias publicly (§4.4); linking
+that alias to a named Person undoes the pseudonymity, so publication of the link is opt-in
+and separate from making the link at all.
+
+**No special edit rights over your own Person.** It is an archival record about you, not a
+profile you own — corrections go through propose/publish like everything else. And account
+deletion severs the link without deleting the Person, because archival content about a real
+person is governed by the redaction path (§2.2a), not by whether they still hold an
+account. The DSGVO tension there is a live open item (§7).
 
 ## 3. Project structure
 
@@ -250,13 +637,25 @@ Bun workspaces + Turbo, as today. Responsibilities:
 
 | Workspace | Owns |
 | --- | --- |
-| `shared/` | Cross-boundary types; the **directive-Markdown parser/serializer** (needed server-side to extract links, client-side to drive the editor); fuzzy-date formatting; permission definitions |
+| `shared/` | Cross-boundary types; the **content module** (below); rough-date construction, validation and formatting; permission definitions |
 | `server/` | Hono API, domain layer, Drizzle schema + migrations, auth, moderation, search, translation, image derivatives, S3 access |
 | `client/` | Vite + React 19 SPA — TanStack Router/Query, Tailwind v4, shadcn/ui, MapLibre, TipTap |
 | `docker/` | Compose stack, custom Postgres image, MinIO |
 
-The `shared` package matters more than in the bhvr template: the content format is parsed
-on both sides, and a divergence between the two parsers corrupts stored content.
+**The content module is one module, not a parser and a serializer.** The mdast AST is the
+canonical representation; directive-Markdown and TipTap's document are both *projections*
+of it, produced and consumed at the edges:
+
+```
+parse(markdown) → Doc        serialize(Doc) → markdown
+fromEditor(tiptap) → Doc     toEditor(Doc) → tiptap
+extractLinks(Doc) → Ref[]    protectForTranslation(Doc) → { text, placeholders }
+```
+
+Framing it as two parsers is what makes divergence possible; with one canonical form there
+is nothing to diverge *from*. It also hands us the test surface for free — `serialize(parse(x)) === x`
+and `toEditor`/`fromEditor` round-trips are property tests, which is the cheapest strong
+guarantee available for a format that stored content depends on.
 
 **Rule:** every write goes through the server's domain layer, never raw SQL — versioning,
 the closure invariant and link extraction are all enforced there.
@@ -289,10 +688,19 @@ shapes all have to work from the same source and the same configuration mechanis
    and object storage supplied by whoever runs them.
 
 What makes one codebase serve all three is that the database and object store are always
-**opaque endpoints behind connection strings**. Assume nothing about who operates them,
-whether we hold superuser rights, which extensions are installed, or whether there is
-filesystem access — and let no provider SDK leak into the code. In development those
-strings happen to point at localhost; nothing else changes.
+**opaque endpoints behind connection strings**. Assume nothing *undocumented* about who
+operates them, whether we hold superuser rights, which extensions are installed, or whether
+there is filesystem access — and let no provider SDK leak into the code. In development
+those strings happen to point at localhost; nothing else changes.
+
+**Stated requirements are fine; silent assumptions are not.** The line is whether a host
+can reasonably satisfy it:
+
+| Requirement | Status |
+| --- | --- |
+| **Postgres ≥ 18** (for native `uuidv7()`) | **Required**, stated in the README — any host can meet a major-version floor |
+| S3-compatible object storage | **Required** — the API, not a particular provider |
+| Hunspell `de_DE` in `$SHAREDIR/tsearch_data/` | **Optional** — many managed hosts structurally cannot allow it, so search degrades instead (§4.3) |
 
 **Two separate Compose files, no profiles.**
 
@@ -469,6 +877,12 @@ to render without a round-trip per element. That is UX, not security: the server
 
 ### 4.5 Images
 
+**All of the discipline below lives behind one module** — roughly
+`processUpload(file, corners) → { original, web, thumb, exif }` — and no component
+allocates a canvas directly. The clamping and release rules are the kind that get
+reimplemented in three places, with one of them forgetting, and the failure is silent
+(`getContext` returning `null`) rather than loud.
+
 Client-side for the upload path — it saves bandwidth on village 3G and the crop/deskew UI
 needs the bitmap anyway. Server-side is available again for derivative regeneration,
 format migration and batch work.
@@ -538,6 +952,33 @@ invariant, moderation transitions and link extraction are rules, not CRUD.
   query constraints, so every read path (including FTS, backlinks and translation lookups)
   is permission-correct by construction rather than by each author remembering.
 
+**The interface is domain operations, not tables.** Table-per-type, `proposal_id`,
+per-entity version integers and the closure invariant are *implementation*. A caller —
+including a controller — should be able to work without learning any of them:
+
+```
+findPublished(id, actor)          listPublished(query, actor)
+findVersion(id, version, actor)   history(id, actor)
+propose(draft, actor)             editProposal(id, draft, actor)
+publish(proposalIds, actor)       reject(proposalId, reason, actor)
+```
+
+If a controller ever mentions `proposal_id` or assembles a three-table join, the seam is in
+the wrong place and the module has gone shallow.
+
+**Every read takes an actor.** Not optional, not defaulted. Anonymous is *an actor holding
+the public role set* (§4.4), never the absence of one — so there is always something to
+pass, and scoping stops being a step anyone can forget. This is what makes §4.6 #7 hold:
+backlinks, FTS and translation lookups cannot be written unscoped, because there is no
+unscoped function to call.
+
+**Layers earn their place; they are not a filing system.** A service that only forwards to
+its repository fails the deletion test — delete it and no complexity reappears — so it
+should not exist, and the controller can use the repository directly. Controller → Service
+→ Repository describes *where behaviour goes when there is behaviour*, not a mandate that
+every entity gets three files. Publishing needs a service; fetching one place by id
+probably doesn't.
+
 **Mapping rather than read/write separation.** Published-content views (`published_media`
 et al.) were considered and rejected: they double the schema surface — a column added to a
 table is silently invisible until added to the view — and read paths here are the
@@ -572,42 +1013,97 @@ duplication; request shapes the client must *construct* belong in `shared`.
 `updated_at`, `updated_by` — including join tables, role grants and approvals. Omitted
 from the per-table notes to avoid repeating it fourteen times.
 
+**Primary keys are UUIDv7, generated by the database** — `DEFAULT uuidv7()`. Time-ordered,
+so inserts append to the right of the index instead of scattering across it the way UUIDv4
+does, and so `ORDER BY id` *is* creation order, which is what §2.8 relies on for comment
+ordering. Generating in the database also means an id exists for every row however it was
+written, including a psql session during a migration.
+
+This sets a **minimum of Postgres 18**, where `uuidv7()` is built in. That is a stated
+deployment requirement (README, §4.1) rather than a silent assumption — the distinction
+being that any host can satisfy a major-version floor, whereas filesystem access for the
+Hunspell dictionary (§4.3) is something many hosts structurally cannot grant, which is why
+that one degrades instead.
+
+(UUIDv7 embeds a millisecond timestamp, so an id discloses roughly when a row was created.
+For this data that is already public in `created_at`.)
+
 **Identity and versioning**
 
 | Table | Notes |
 | --- | --- |
-| `entity` | `id`, `type` (discriminator), `original_language`, `published_version` |
+| `entity` | `id`, `type` (discriminator), audit quartet, plus nullable `version` and `original_language` — the collapsed spine (see below) |
+| `user` | `entity_id`, email, alias, `email_verified`, `approved` |
+| `thread` | `entity_id`, target entity |
+| `comment` | `thread_id`, `on_version`, body, moderation status — **not** an entity; ordered by its own UUIDv7 `id` |
 | `entity_version` | `(entity_id, version)`, `published_at`, `published_by`, `redaction_reason` |
 | `proposal` | `id`, `entity_id`, `kind` (create/edit), `status`, `rejection_reason`, `moderator_id`, `based_on_version`, `terms_version` |
 
 Type is **not** duplicated onto `proposal` — it's one join to `entity`.
 
+**The five conceptual layers do not each become a table.** Taken literally, loading a
+Person would be `entity ⋈ versioned_entity ⋈ localized_entity ⋈ historic_entity ⋈ person ⋈
+person_content` — six tables on the single most common read in the system, three of which
+carry almost nothing:
+
+- `versioned_entity` would hold one column (`version`)
+- `localized_entity` would hold one column (`original_language`)
+- `historic_entity` would hold **no columns at all** — links, sources and comments are
+  their own tables keyed by `entity_id`, so it is a pure marker
+
+So the spine collapses into `entity`, with `version` and `original_language` **nullable —
+null for `User` and `Comment`**, which is exactly what "descends from `Entity` but not
+`VersionedEntity`" means in table terms. Table-per-type still applies where it earns its
+keep: the subtypes and their content companions. A Person read is then
+`entity ⋈ person ⋈ person_content`.
+
+The model keeps the four layers because they express real distinctions — versioned vs not,
+localized vs not, archival vs not — and the registry (§4.6 #5) knows which capability each
+type has. That is what the layers are *for*; materialising them as joins is not.
+
 **Content** — every row carries `entity_id`, nullable `version`, nullable `proposal_id`:
+
+Each subtype is a **pair**: `<type>` for what does not vary by language, `<type>_content`
+for what does — the latter keyed additionally by `language`, one row per language.
 
 | Table | Notes |
 | --- | --- |
-| `localized_content` | `language`, `name`, `abstract`, `description`, generated `tsvector`, `regconfig` |
-| `person_content` | birth/death fuzzy dates, non-translatable attributes |
-| `place_content` | point lat/lng, GeoJSON area, derived bbox, validity period |
-| `media_content` | capture fuzzy date, optional ad-hoc lat/lng |
-| `story_content` | — |
-| `relationship_content` | kind, partner/child entity references, fuzzy date |
-| `source_content` | citation metadata |
-| `content_tag` | → tag entity |
-| `content_link` | → target entity (from directive extraction) |
-| `content_source` | → source entity + locator (page, date, timestamp) |
+| `person` | `born`, `died` — nullable `Date` each; **`died IS NULL` means living**, which drives the §4.4 gate |
+| `person_content` | `language`, `name`, `abstract`, `description` |
+| `place` | point lat/lng, GeoJSON area, derived bbox, `valid_from` / `valid_until` (`Date?` each) |
+| `place_content` | `language`, `name`, `abstract`, `description` |
+| `media` | `captured` nullable `Date`, optional ad-hoc lat/lng |
+| `media_content` | `language`, `name`, `abstract`, `description`, **`caption`** |
+| `story` | `occurred` nullable `DateOrInterval` — a story can genuinely span years |
+| `story_content` | `language`, `name`, `abstract`, **`body`** |
+| `relationship` | kind, `directed` flag, the two `Person` entity references, optional `start` and `end` (`Date?` each) |
+| `relationship_content` | `language`, `name`, `abstract`, `description` |
+| `source` | `identifier`, `published` nullable `DateOrInterval` (a church book spans years) |
+| `source_content` | `language`, `name`, `abstract`, **citation text** |
+| `tag` | `slug` — the stable language-independent identifier; the label lives in `tag_content` |
+| `tag_content` | `language`, `name`, `abstract` (**label only**, no description) |
+| `terms` | `effective_from` — which version was in force on a given date |
+| `terms_content` | `language`, `name`, `abstract`, **`body`** |
+| `entity_tag` | → tag entity |
+| `link` | `target_entity_id` only — no kind, no label. Unique on `(entity_id, version/proposal_id, target_entity_id)`; body references are unioned in on save (§2.6) |
+| `citation` | → source entity + `locator` (page, date, timestamp) |
 | `media_file` | → `asset`, role (original/web/thumb), primary flag, sort |
+
+Every `<type>_content` carries `name` and `abstract` by convention — that is what the
+preview projection and the detail page depend on — plus a generated `tsvector` and
+`regconfig` for search (§4.3). The bolded columns are why a single shared table was
+rejected: they have no sensible home in a generic `name`/`abstract`/`description` row.
 
 **Immutable and auxiliary**
 
 | Table | Notes |
 | --- | --- |
 | `asset` | storage key, sha256, mime, bytes, dimensions — never mutated |
-| `comment` | entity, author, body, moderation status, `made_on_version` |
 | `translation_cache` | entity, field, target language, source hash, text, provider |
 | `role` | the roles themselves |
 | `role_permission` | role → permission; **`role_id IS NULL` means a public permission**. Temporal: `granted_at/by`, nullable `revoked_at/by`; active = `revoked_at IS NULL` |
 | `user_role` | user → role, both non-nullable, same temporal shape |
+| `user_person` | optional 1:1 account ↔ Person link; moderator-confirmed, with an opt-in `is_public` flag (§2.9) |
 | `terms_acceptance` | user, ToC entity + version, accepted at |
 | `notification_outbox` | queued emails |
 | better-auth tables | via the Drizzle adapter |
@@ -619,7 +1115,7 @@ Type is **not** duplicated onto `proposal` — it's one join to `entity`.
   `role_permission (role_id)`, plus partial **unique** indexes on `(user_id, role_id)` and
   `(role_id, permission)` under the same predicate — a plain unique constraint would block
   re-granting something previously revoked.
-- GIN over the generated `tsvector` in `localized_content`.
+- GIN over the generated `tsvector` in each `<type>_content` table.
 - btree on `place_content` bbox columns and `media_content` lat/lng for the viewport query.
 - btree on `(entity_id, version)` everywhere content rows are keyed.
 
@@ -636,18 +1132,58 @@ role set (§4.4). Nothing is HTTP-cached for now — `Cache-Control: no-store` t
 
 ## 6. Frontend implementation
 
+**Primary context per surface.** Everything must work on both, but "works" is not the same
+as "designed for", and knowing which way each surface leans prevents both failure modes —
+a cramped desktop page and an unusable phone one:
+
+| Surface | Leans | Why |
+| --- | --- | --- |
+| Capture, crop, upload | **Phone** | The camera is there; the album is on the kitchen table |
+| Map + timeline | **Both, genuinely** | Standing in the village, and browsing at home |
+| Entry detail, links, sources | **Desktop** | Reading, following references, lingering |
+| Ancestry / pedigree | **Desktop** | A wide SVG that a phone can only pan around |
+| Moderation queue and diffs | **Both** | Triage on a sofa; a real diff review at a desk |
+| Search | **Both** | Cmd+K at a desk, a visible control on a phone |
+
+
 Vite + React 19, TanStack Router (file-based) + TanStack Query, Tailwind v4, shadcn/ui.
 **Paraglide JS** for UI strings — TanStack Router documents it as the primary i18n
 integration, and its `rewrite` option handles locale-prefixed URLs while file routes stay
 canonical. It tree-shakes per message, which matters when contributors are on 3G.
 
+### Page structure
+
+**One index per entity type, each visualised as that type actually is — plus a uniform
+detail page.** The map is not a feature bolted beside the archive; it *is* the Places
+index. Ancestry is not a separate product; it *is* how People are indexed.
+
+| Type | Index view |
+| --- | --- |
+| **Places** | the **map**, with the timeline |
+| **People** | the **ancestry** graph, with search as the practical entry point |
+| **Media** | gallery grid, filterable by date, tag and place |
+| **Stories** | list |
+| **Sources** | bibliography |
+| **Tags** | index, doubling as the moderator's vocabulary view |
+| **Relationships** | no standalone index — they surface on the people they connect |
+
+This falls out of the domain model rather than being designed against it: the types are
+uniform underneath (§2.1), so only their *presentation* differs. It also means a new entity
+type arrives with an obvious home rather than a navigation argument.
+
+Detail pages are uniform across every type — name, abstract, description, links, sources,
+comments, version history — which is what makes the generic `HistoricEntity` worth having
+on the client as well as in the schema.
+
 ### Components
 
-**Map and timeline**
+**Map and timeline** — the Places index
+
+
 - `MapView` — MapLibre GL JS. Pins, GeoJSON areas, viewport-driven loading. Raster
   overlays for historic maps with an opacity slider. `CooperativeGesturesHandler` so a
   full-width map doesn't trap page scroll on mobile.
-- `TimelineControl` — filters the map by an **overlap** test against fuzzy date ranges;
+- `TimelineControl` — filters the map by a range **overlap** test against date extents;
   also selects which historic overlay is offered.
 - `PlacePin`, `PlaceArea`, `MapUploadAffordance` — tap a location to contribute there.
 
@@ -661,7 +1197,24 @@ canonical. It tree-shakes per message, which matters when contributors are on 3G
 - `EntityChip` — an inline link, resolved against the *current* target so corrections
   propagate; falls back to the label stored in the directive when a target is gone.
 - `LinksSection` / `SourcesSection` — the two aggregation blocks at the foot of an entry.
-- `FuzzyDate` — renders "um 1930" per locale.
+- `RoughDate` — renders a date at its own granularity per locale: "1920er",
+  "März 1920", "14. März 1920", and intervals as "1920er – März 1931". Never renders a
+  rough date as though it were exact.
+
+  **Inline-only, no block wrappers.** Dates appear mid-sentence in a description, inside a
+  chip, in a table cell and in a heading, so the component renders a `<span>` (or a
+  fragment of them) and nothing else — a `<div>` inside a `<p>` is invalid nesting that
+  browsers silently re-parse, breaking the surrounding markup. Same rule for `EntityChip`,
+  which lives inside prose by definition.
+
+  Use `<time datetime>` where the granularity is representable — `1920`, `1920-03`,
+  `1920-03-14` — and a plain `<span>` for **decade**, which HTML cannot express (there is
+  no `192X` form, and `datetime="1920"` would assert a precision the data does not have).
+  Both are inline, so composition is unaffected either way. An interval is two such
+  elements plus a separator; HTML has no range form, so don't invent one.
+
+  Each endpoint gets `white-space: nowrap` so "März 1931" cannot break across lines while
+  the interval as a whole still wraps at the separator.
 - `VersionHistory` — browse and render prior versions (rendered, never queried).
 - `CommentThread` — with the "refers to an earlier version" marker.
 
@@ -678,7 +1231,9 @@ canonical. It tree-shakes per message, which matters when contributors are on 3G
   set once) then per-item correction. Without this, digitising 300 Feuerwehr photos one at
   a time is where the seed corpus quietly dies. Same components as the phone flow, denser
   layout.
-- `FuzzyDateInput` — decade buttons first, precise entry second.
+- `RoughDateInput` — granularity selector (Tag / Monat / Jahr / Jahrzehnt) leading with
+  decade buttons, plus a "Zeitraum" toggle for the second endpoint. Rejects overlapping
+  boundaries at entry with an explanation, rather than letting the database refuse it.
 
 **Moderation**
 - `ModerationQueue` — grouped by type, batch actions.
@@ -721,7 +1276,9 @@ not after. A German site publishing photographs of identifiable people has real 
   theoretical.
 - A reachable **report/takedown route** on every published item.
 - **Deletion (?)** — when an account is erased, do their contributions go too, or does the
-  alias detach? An archive that silently loses contributions isn't much of an archive.
+  alias detach? An archive that silently loses contributions isn't much of an archive. The
+  account↔Person link (§2.9) sharpens this: erasing the account is straightforward, but the
+  Person entity is archival content about a real individual and survives on its own terms.
 
 ---
 
@@ -730,7 +1287,7 @@ not after. A German site publishing photographs of identifiable people has real 
 1. **Groundwork** — Compose stack, custom Postgres image, MinIO, Drizzle, one persisted
    route end to end.
 2. **Domain core** — entity hierarchy, versions, proposals, closure invariant, localized
-   content, fuzzy dates. The hardest part, and everything else assumes it.
+   content, rough dates. The hardest part, and everything else assumes it.
 3. **Auth** — better-auth, magic link, `emailVerified` + `approved`, roles.
 4. **Upload** — camera and file, crop/deskew, client derivatives, batch metadata.
 5. **Moderation** — queue, diff, dependencies. *Nothing can go public before this exists.*

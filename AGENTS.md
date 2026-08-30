@@ -59,9 +59,9 @@ The repo is still the bhvr starter with TanStack Router/Query, Tailwind v4 and s
 
 Three product constraints that bind almost any feature work:
 
-- **Mobile-first, not mobile-adapted.** Most contributors are on a phone. Design the small screen first and derive desktop from it.
+- **Contributing is phone-shaped; viewing is desktop-shaped.** Both are first-class. Capture and upload are designed for a phone; entry detail, ancestry and long reading are designed for a desk; the map and search are genuinely both. Don't derive one layout mechanically from the other — see the per-surface table in `PLAN.md` §6.
 - **Nothing is published unmoderated.** Every user-contributed record carries a moderation state and is invisible to the public until approved.
-- **Dates are fuzzy by default.** Contributors don't know exact dates. Anything dated uses a range plus a precision enum, never a single timestamp.
+- **Dates are rough by default.** A date is an anchor plus a granularity (`day`/`month`/`year`/`decade`) and therefore denotes a *span*; "specific" is just `day` granularity. Three embedded value types sit on that primitive — `Date` (one, required), `DateOrInterval` (start required, end optional) and `Interval` (both). **`Date` for things that happen once** (born, died, captured), **`DateOrInterval` for things that can last** (a story's period, a source's coverage); uncertainty about *when* is granularity's job, not an interval's. They are constrained so the start's span ends at or before the end's span begins, and, when embedded nullable, so an end can never appear without a start. Note `CalendarDate` is a *different* thing: an exact SQL `date`, used for legal dates like the ToC's `effectiveFrom`. Stored as Postgres `daterange`s with a generated extent for the timeline's `&&` overlap query. The UI renders each end at its own granularity — never a rough date dressed up as an exact one — and renders **inline only** (`<span>`/`<time>`, no block wrappers), since dates and chips appear mid-sentence inside prose. See `PLAN.md` §2.5 and §6.
 
 ## Platform
 
@@ -69,7 +69,9 @@ The deployment target is a **containerized Hono server** talking to **Postgres**
 
 **Three deployment shapes must all work from the same source**: (1) development — client and server run from source on the host with hot reload, Compose supplying only Postgres and MinIO; (2) the whole Compose stack as production on one box; (3) the app image on a platform with externally-provided services. Compose is a real deployment option, not just a dev toy — but it is never assumed.
 
-What makes one codebase serve all three: Postgres and object storage are **always opaque endpoints behind connection strings** from environment variables. Assume nothing about how they are hosted, whether we hold superuser rights, which extensions are installed, or whether there is filesystem access. No provider-specific SDKs. In development the strings point at localhost; nothing else differs.
+What makes one codebase serve all three: Postgres and object storage are **always opaque endpoints behind connection strings** from environment variables. Assume nothing *undocumented* about how they are hosted, whether we hold superuser rights, or which extensions are installed. No provider-specific SDKs. In development the strings point at localhost; nothing else differs.
+
+Stated requirements are allowed where any host can meet them — **Postgres ≥ 18** (native `uuidv7()`) and an S3-compatible API are hard requirements, documented in the README. Filesystem access for the Hunspell dictionary is *not* a requirement, because many managed hosts cannot grant it, so German search degrades instead.
 
 > An earlier draft targeted Cloudflare Workers + D1 + R2. That was reversed: Cloudflare has no hard spend cap ("Budget alerts are informational only"), the 10ms free-tier CPU ceiling doesn't survive an authenticated route, and a Worker isn't a container. Ignore any remaining Workers/D1 references you find in older notes.
 
@@ -82,6 +84,10 @@ What makes one codebase serve all three: Postgres and object storage are **alway
 - **Every write goes through the server's domain layer, never raw SQL.** Versioning, the publish closure invariant and link extraction are enforced there, and there are enough invariants now that a direct writer will violate one.
 - **Backend layering is Controller → Service → Repository** (`PLAN.md` §5.1). Controllers do HTTP and authorization; services are framework-free domain logic (no Hono types) so background jobs reuse them; repositories own all base-table access and the row→domain mapping, with **permission query handlers** turning an effective permission set into query constraints so every read path — FTS and backlinks included — is correct by construction.
 - **The RPC chaining rule applies per controller.** Each controller must be a single chained expression, mounted via `.route()` inside another single chained expression, or its routes vanish from the client's types.
+- **`Link` is bare and versioned with its parent** — a pointer from one `HistoricEntity` to another, no kind or label, existing for SQL discovery (backlinks, traversal) rather than display. Every reference in an entity's body must be unioned into its link set on save. `Relationship` is the opposite: a full entity, **between exactly two `Person`s**, with a kind, a `directed` flag and optional start/end dates — it is what the ancestry graph is drawn from.
+- **The domain interface is operations, not tables.** `proposal_id`, table-per-type joins and version integers are implementation. If a controller mentions any of them, the seam is in the wrong place.
+- **Every read takes an actor** — anonymous is an actor holding the public role set, never the absence of one. There is no unscoped read function to call, which is what keeps derived read paths (FTS, backlinks, translation) correct.
+- **Layers earn their place.** A service that only forwards to its repository should not exist; let the controller use the repository. Controller → Service → Repository says where behaviour goes, not that every entity needs three files.
 
 ## Authorization
 
@@ -96,11 +102,24 @@ What makes one codebase serve all three: Postgres and object storage are **alway
 
 Three load-bearing rules, detailed in `PLAN.md` §2:
 
-- **`VersionedEntity` → `HistoricEntity` → subtypes**, table-per-type, discriminator on the entity table only.
+- **`Entity` → `VersionedEntity` → `LocalizedEntity` → `HistoricEntity` → subtypes**, each layer adding one capability (identity+audit, versions, languages, archival apparatus). `User` and `Thread` descend from `Entity` directly — identity and audit, no versions. Discussion is threads-of-comments, not a flat list; comments are rows under a thread, moderated individually, ordered by their UUIDv7 id. The discriminator lives on the entity table only. **The spine is one physical table**: `version` and `original_language` are nullable columns on `entity`, null for `User` and `Comment`; table-per-type applies to the subtypes and their content companions, not to the layers (`PLAN.md` §5.2). Each subtype is a **pair**: `place` for what doesn't vary by language, `place_content` for what does (one row per language). There is no shared `LocalizedContent` table — types need different translatable fields — but every `<type>_content` carries `name` and `abstract` by convention, enforced by a registry test.
 - **Proposals share the content tables with published rows**, distinguished by a nullable `proposal_id`. Versions are per-entity integers created at publish, never at proposal time. *A query that forgets `proposal_id IS NULL` returns proposals to the public* — i.e. publishes unmoderated content. Base tables are read only inside the repository, and the row→domain mapper asserts `proposal_id` is null rather than quietly dropping it.
 - **Published content may only reference published content.** One invariant covering tags, links, places and sources alike.
+- **The site is one index per entity type, not a map plus extras.** The map *is* the Places index; ancestry *is* the People index. Detail pages are uniform across types. See `PLAN.md` §6.
+- **A user account may be linked to a Person entity** (§2.9) — moderator-confirmed, never self-asserted, not public by default, and carrying no special edit rights over that Person.
 
 Two more rules that are easy to violate by accident:
 
 - **Every mutable row carries `created_at` / `created_by` / `updated_at` / `updated_by`** — join tables, role grants and account approvals included, not just entities. New tables get them by default.
+- **Primary keys are UUIDv7, generated by the database** (`DEFAULT uuidv7()`), which sets a **minimum of Postgres 18**. Being time-ordered, `ORDER BY id` is creation order — comment ordering depends on it. Never `gen_random_uuid()`; that's v4 and scatters index writes.
 - **Proposals are freely editable; published versions are not.** Editing a version exists only for legal redaction (a KUG or copyright takedown, DSGVO erasure) — publishing a correction doesn't help, because prior versions still render the content. It requires a reason, is loudly warned about in the UI, and must never be the path a normal feature reaches for.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live as GitHub issues in `benni-tec/dorf-archiv`, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` and `docs/adr/` at the repo root, created lazily by `/domain-modeling` rather than upfront. See `docs/agents/domain.md`.

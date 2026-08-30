@@ -14,8 +14,10 @@ tied to a timeline.
 - **Map and timeline as the entry point.** Tap a place to see what has been contributed there,
   or tap it to contribute. A timeline filter narrows both the pins and the historic map
   overlays.
-- **Contribute from a phone.** Photograph an old print, crop and straighten it in the browser,
-  add a rough date and a place. Designed for a thumb on a small screen first.
+- **Contribute from a phone, browse from anywhere.** Photograph an old print, crop and
+  straighten it in the browser, add a rough date and a place — all designed for a thumb on a
+  small screen. Reading an entry, following its sources or working through a family tree is
+  designed for a desk. Both are first-class rather than one derived from the other.
 - **Nothing is published unmoderated.** Every contribution is a *proposal* until a moderator
   publishes it. Moderators see diffs, can combine several proposals into one version, and
   every change is audited.
@@ -92,6 +94,14 @@ connection strings, so three shapes work from the same source:
 Configuration is entirely environment variables — database URL, S3 endpoint and credentials,
 auth secret, public URL, operator details for the Impressum. Nothing assumes a particular
 provider, and no provider SDK appears in the code.
+
+**Requirements of the backing services:**
+
+| | |
+| --- | --- |
+| **Postgres 18 or later** | Required. Primary keys use the built-in `uuidv7()`. |
+| **S3-compatible object storage** | Required. The API, not any particular provider. |
+| Hunspell `de_DE` dictionary in Postgres | Optional, and affects search quality only — see below. |
 
 The eventual host must be **EU-hosted**, **containerizable**, and have a **hard spending cap**
 (billing alerts are not sufficient). See `PLAN.md` §4 for why, and for the providers that were
