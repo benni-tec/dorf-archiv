@@ -47,9 +47,10 @@ project/
   client/              the SPA, plus its nginx image
   server/              the Hono API, plus its image
   shared/              cross-boundary types
-  postgres/            Postgres 18 carrying the Hunspell dictionary
-  pgadmin/             the pre-registered server connection
-  proxy/               the reverse proxy that fronts the stack
+  postgres/            Postgres 18 with the Hunspell dictionary, and pgAdmin's
+                       pre-registered connection to it
+  Dockerfile           the reverse proxy that fronts the stack
+  nginx.conf           its whole configuration — vhosts and the TCP stream
   compose.infra.yml    backing services — what development runs against
   compose.app.yml      the app and client services
   compose.yml          both of the above, via `include:`
@@ -145,7 +146,12 @@ connection strings, so three shapes work from the same source:
 
    Postgres gets a **port rather than a hostname** because its wire protocol carries nothing
    to route on — no Host header, and no TLS handshake for nginx to read a name out of. See
-   `project/proxy/stream.conf`.
+   the `stream` block at the foot of `project/nginx.conf`.
+
+   The proxy is part of the *infrastructure*, so `dev:infra` starts it too. The client and
+   API routes answer 502 there until the application containers exist, which is deliberate:
+   its upstreams are resolved per request rather than at start-up, so a missing one is a bad
+   response rather than a proxy that will not boot.
 
    The client's API URL is baked into its bundle at build time, so it follows the proxy's
    names and a change of hostname means rebuilding that image.

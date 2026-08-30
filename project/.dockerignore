@@ -1,0 +1,10 @@
+# The proxy's build context is this directory, which also holds the three workspaces. It
+# needs two files out of it, so everything is excluded and those two are named back in —
+# otherwise every proxy build would ship the client, the server and their node_modules to
+# the daemon.
+#
+# This file applies only to builds whose context is `project/`. The server and client images
+# build from the repository root and use the .dockerignore there.
+*
+!Dockerfile
+!nginx.conf

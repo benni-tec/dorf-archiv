@@ -85,7 +85,7 @@ services:
       - "${BIND_ADDRESS:-127.0.0.1}:${PGADMIN_PORT:-5050}:80"
     volumes:
       - pgadmin-data:/var/lib/pgadmin
-      - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
+      - ./postgres/servers.json:/pgadmin4/servers.json:ro
 
   # One-shot bucket creation. Without it, first-run development means clicking through the
   # MinIO console. It retries rather than depending on a healthcheck, because the MinIO
@@ -117,6 +117,46 @@ services:
         # through short-lived presigned URLs the backend issues after a permission check.
         mc anonymous set none "local/$$S3_BUCKET"
         echo "bucket $$S3_BUCKET ready (private)"
+
+  # One entry point in front of the stack, routing by hostname (PLAN.md §4.1 shape 2).
+  #
+  #   http://${PROXY_HOST}:${PROXY_PORT}            the client
+  #   http://api.${PROXY_HOST}:${PROXY_PORT}        the API
+  #   http://admin.db.${PROXY_HOST}:${PROXY_PORT}   pgAdmin
+  #   ${PROXY_HOST}:${PROXY_DB_PORT}                Postgres, over TCP
+  #
+  # Each of those names can be overridden on its own with PROXY_CLIENT_HOST,
+  # PROXY_API_HOST or PROXY_ADMIN_HOST.
+  #
+  # The database is on its own port rather than a hostname because the Postgres wire
+  # protocol has nothing to route on — see proxy/stream.conf.
+  proxy:
+    build:
+      # This directory, not the repository root: the proxy needs only its Dockerfile and
+      # nginx.conf, and project/.dockerignore keeps the rest of the workspace out.
+      context: .
+      dockerfile: Dockerfile
+    image: dorf-archiv/proxy:latest
+    restart: unless-stopped
+    depends_on:
+      # Only what lives in this file. The application services are in compose.app.yml and
+      # may not exist at all; their routes answer 502 until they do.
+      postgres:
+        condition: service_healthy
+    environment:
+      # Each name is assembled here, from PROXY_HOST, the same way DATABASE_URL is assembled
+      # from its parts — the proxy receives finished hostnames rather than a base name and
+      # the rules for building the others. That keeps the composition in one readable place,
+      # and it means a deployment can put any one of them on an unrelated domain by setting
+      # its own variable, without the others following it.
+      PROXY_CLIENT_HOST: ${PROXY_CLIENT_HOST:-${PROXY_HOST:-localhost}}
+      PROXY_API_HOST: ${PROXY_API_HOST:-api.${PROXY_HOST:-localhost}}
+      PROXY_ADMIN_HOST: ${PROXY_ADMIN_HOST:-admin.db.${PROXY_HOST:-localhost}}
+    ports:
+      - "${PROXY_BIND_ADDRESS:-0.0.0.0}:${PROXY_PORT:-8000}:80"
+      # Not 5432: compose.infra.yml already binds that, and two publishers of one port on
+      # one address is a container that will not start.
+      - "${PROXY_BIND_ADDRESS:-0.0.0.0}:${PROXY_DB_PORT:-5433}:5432"
 
 volumes:
   postgres-data:
