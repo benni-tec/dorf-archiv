@@ -35,13 +35,13 @@ const schema = z.object({
 
 	S3_ENDPOINT: nonEmpty.refine(
 		(value) => /^https?:\/\//.test(value) && URL.canParse(value),
-		"must be an absolute http(s) URL, e.g. http://localhost:9000",
+		"must be an absolute http(s) URL, e.g. http://localhost:8333",
 	),
 	S3_REGION: nonEmpty.default("us-east-1"),
 	S3_BUCKET: nonEmpty,
 	S3_ACCESS_KEY_ID: nonEmpty,
 	S3_SECRET_ACCESS_KEY: nonEmpty,
-	/** Garage and most self-hosted S3 implementations serve path-style URLs only. */
+	/** SeaweedFS and most self-hosted S3 implementations serve path-style URLs by default. */
 	S3_FORCE_PATH_STYLE: booleanish.default(true),
 });
 

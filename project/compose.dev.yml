@@ -48,62 +48,51 @@ services:
   # S3-compatible object storage. The application depends on the S3 API, not on a provider,
   # so this is only development's answer to it — a hosted S3 is reached by changing
   # S3_ENDPOINT and nothing else.
-  garage:
-    image: dxflrs/garage:v2.3.0
-    restart: unless-stopped
-    environment:
-      # Kept out of garage.toml so the committed config carries no secrets; both override
-      # the corresponding config keys.
-      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
-      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:-dorf-dev-admin-token}
-    ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:${S3_PORT:-3900}:3900"
-    volumes:
-      - garage-meta:/var/lib/garage/meta
-      - garage-data:/var/lib/garage/data
-      - ./garage/garage.toml:/etc/garage.toml:ro
-
-  # One-shot cluster setup: assign the layout, import the key from .env, create the bucket.
-  # **Not optional convenience** — a Garage node with no layout assigned stores nothing at
-  # all, so without this the stack comes up and every write fails.
   #
-  # A built image, because the Garage image is the bare binary with no shell to run a script
-  # with. The metadata volume is mounted read-only for the node key, which is what the CLI
-  # authenticates its RPC with.
-  garage-init:
-    build:
-      context: garage
-    image: dorf-archiv/garage-init:latest
-    depends_on:
-      garage:
-        condition: service_started
+  # `weed mini` is the whole of SeaweedFS in one process — master, volume, filer, the S3
+  # gateway and the admin UI — which is all a single box needs. No init container: the key
+  # and the bucket come from the environment on every start (see the flags below).
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.48
+    restart: unless-stopped
+    command:
+      - mini
+      - -dir=/data
+      # Off, because each is a second way into the store that nothing here uses: WebDAV is
+      # an unauthenticated read/write path, and Iceberg and Lance are table catalogs.
+      - -webdav=false
+      - -s3.port.iceberg=0
+      - -s3.port.lance=0
+      # A misspelt S3_BUCKET should fail `GET /health`'s storage probe, not quietly become a
+      # second, empty bucket on the first upload.
+      - -s3.autoCreateBucket=false
+      # On by default, reporting to seaweedfs.com.
+      - -master.telemetry=false
     environment:
-      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+      # **These are what make the bucket private.** With no identity configured SeaweedFS
+      # allows every S3 request anonymously; with one, it authenticates all of them. The key
+      # is a static identity read from here on every start and never persisted, so .env
+      # stays the single source.
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-dorfarchivdev}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-dorf-dev-secret-key-0123456789}
+      # Created on start if absent.
       S3_BUCKET: ${S3_BUCKET:-dorf-archiv}
-      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-dorfarchivdev}
-      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-dorf-dev-secret-key-0123456789}
-    volumes:
-      - garage-meta:/var/lib/garage/meta:ro
-      - ./garage/garage.toml:/etc/garage.toml:ro
-
-  # Garage ships no admin interface of its own, so this is the community one. It drives
-  # Garage's admin API, which is what the token is for.
-  #
-  # No AUTH_USER_PASS here: it is on loopback and nothing is in front of it. `compose.yml`
-  # sets one, because there it is published through the proxy.
-  garage-webui:
-    image: khairul169/garage-webui:1.1.0
-    restart: unless-stopped
-    depends_on:
-      garage:
-        condition: service_started
-    environment:
-      API_BASE_URL: http://garage:3903
-      API_ADMIN_KEY: ${GARAGE_ADMIN_TOKEN:-dorf-dev-admin-token}
-      S3_ENDPOINT_URL: http://garage:3900
-      S3_REGION: ${S3_REGION:-garage}
+      # No WEED_ADMIN_PASSWORD here, which leaves the admin UI without a login: it is on
+      # loopback and nothing is in front of it. `compose.yml` sets one, because there it is
+      # published through the proxy.
     ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:${GARAGE_WEBUI_PORT:-3909}:3909"
+      # Only S3 and the admin UI. The filer (8888), master (9333) and volume (9340) HTTP
+      # APIs read and write every object with no authentication at all — never publish them.
+      - "${BIND_ADDRESS:-127.0.0.1}:${S3_PORT:-8333}:8333"
+      - "${BIND_ADDRESS:-127.0.0.1}:${SEAWEEDFS_ADMIN_PORT:-23646}:23646"
+    volumes:
+      - seaweedfs-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8333/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
   # A database console, so inspecting a row does not mean remembering psql flags. Reached
   # directly at http://localhost:5050 here — there is no proxy in development to put it
@@ -133,6 +122,5 @@ services:
 
 volumes:
   postgres-data:
-  garage-meta:
-  garage-data:
+  seaweedfs-data:
   pgadmin-data:

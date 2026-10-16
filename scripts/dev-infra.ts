@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Brings up Postgres and Garage in the foreground and tears them down when you stop it —
+ * Brings up Postgres and SeaweedFS in the foreground and tears them down when you stop it —
  * `bun run dev:infra` (PLAN.md §4.1).
  *
  * Foreground with automatic teardown, so there is no separate stop script to forget. Plain
