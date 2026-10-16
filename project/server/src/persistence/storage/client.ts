@@ -5,7 +5,7 @@ import type { ServerEnv } from "../../config/env";
  * Object storage.
  *
  * PLAN.md §4.1 requires the S3 *API*, not a particular provider, so this speaks plain S3 at
- * whatever endpoint it is given — Garage in development, whatever the host offers in
+ * whatever endpoint it is given — SeaweedFS in development, whatever the host offers in
  * deployment. `@aws-sdk/client-s3` is the generic client for that protocol; nothing here
  * may reach for a provider-specific SDK.
  *
