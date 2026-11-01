@@ -6,8 +6,11 @@ import { LINKABLE_TYPES } from "../../../domain/entity";
 import * as schema from ".";
 import { entityType } from "./enums";
 import {
+	DERIVED_TABLES,
 	ENTITY_REGISTRY,
+	MERGE_PARTS,
 	markdownColumns,
+	NON_CONTENT_COLUMNS,
 	REFERENCE_TABLES,
 	VERSIONED_CONTENT_TABLES,
 } from "./registry";
@@ -234,6 +237,35 @@ describe("the list of versioned tables matches the schema", () => {
 
 	test("and is not vacuous", () => {
 		expect(VERSIONED_CONTENT_TABLES.length).toBeGreaterThan(10);
+	});
+});
+
+describe("publishing knows how every table merges", () => {
+	// A table that is neither merged nor derived would publish nothing at all: the version
+	// appears, and that part of what the contributor wrote is missing from it.
+	test("every versioned table is merged or derived, and exactly one of them", () => {
+		const merged = MERGE_PARTS.map((part) => getTableName(part.table));
+		const derived = DERIVED_TABLES.map(getTableName);
+
+		expect([...merged, ...derived].sort()).toEqual(
+			VERSIONED_CONTENT_TABLES.map(getTableName).sort(),
+		);
+		expect(new Set([...merged, ...derived]).size).toBe(
+			merged.length + derived.length,
+		);
+	});
+
+	test.each(
+		MERGE_PARTS.map((part) => [getTableName(part.table), part] as const),
+	)("%s: its key columns exist and are content, not bookkeeping", (_, part) => {
+		for (const column of part.keyColumns) {
+			expect(columnNames(part.table)).toContain(column);
+			expect(NON_CONTENT_COLUMNS).not.toContain(column);
+		}
+	});
+
+	test("the link set is derived, because it must agree with the bodies", () => {
+		expect(DERIVED_TABLES.map(getTableName)).toEqual(["link"]);
 	});
 });
 
