@@ -73,7 +73,22 @@ Root config sets `noUncheckedIndexedAccess` and `verbatimModuleSyntax` (type-onl
 
 Landed so far: the Compose stack; validated configuration; `GET /health`; rough dates in `shared` (§2.5 — the primitive everything archival is dated with) and their strict conversion to and from `daterange` (`persistence/db/rough-date-range.ts`); and **the schema of §5.2** except `notification_outbox` — the `entity` spine with `user`, `entity_version` and `proposal`; all eight versioned subtypes and their content companions; `link`, `citation`, `entity_tag`, `asset`, `media_file`; `thread` and `comment`; `terms_acceptance`; `role`, `role_permission`, `user_role`; `user_person`; `translation_cache`; and the **entity registry** with the tests that make its conventions real.
 
-Not yet written: the actor and its permission resolution, the repository layer with its permission query handlers, and every service; then auth (better-auth, sessions), `notification_outbox`, translation, redaction, and every controller beyond `/health`. **There is no read path yet, so nothing enforces `proposal_id IS NULL` outside the database** — that guard arrives with the repository, and until then no controller may touch a base table.
+Also landed: the **actor** and its resolution (`domain/actor.ts` — public set plus the account's roles, failing with `PermissionResolutionError` rather than guessing, §4.6 #9); the **row-scoping predicates** (`persistence/repository/scope.ts`) and the **published-row assertion** (`persistence/repository/mapper.ts`) — §4.6 #1's two lines of defence, with the registry-driven conformance test behind them; **grants** (`persistence/repository/permissions.ts` — public and role-bound grants are separate functions, revocation stamps rather than deletes); and the **fail-closed route declaration** (`controllers/guard.ts`).
+
+Not yet written: publishing, proposing, the published reads and search; then auth (better-auth, sessions — `identify` answers null for everyone until then), `notification_outbox`, translation, redaction, and every controller beyond `/health`. No controller may touch a base table; they go through the functions above.
+
+### Routes
+
+**Every route declares a permission or an exemption, or the app refuses to start.** Write `requires("place:view")` from `createGuards(…)` as a route's first handler, or `exempt("why")` for the rare route outside the permission system — `/health` is the one so far, because it must answer while the permission tables are unreachable. `assertEveryRouteDeclared` runs inside `createApp` and walks `app.routes`; app-wide `.use()` middleware does not count as declaring anything. The guard resolves the actor itself and hands it to the handler as `c.var.actor`.
+
+### Reading content
+
+Two rules, and they are the ones that publish unmoderated content if broken.
+
+- **Every read takes an actor**, and anonymous is *an actor holding the public role set* — never the absence of one (`anonymousActor()`). There is deliberately no unscoped read to call, which is what stops derived paths like backlinks, FTS and translation lookups being written unscoped.
+- **Constrain with `publishedOnly()`, and let `assertPublished()` catch what slips.** The first is the rule; the second exists because a mapper that merely dropped `proposal_id` would *hide* proposal-ness rather than catch it, turning a leak into a silently well-typed one. `publishedOrOwnProposals()` is the deliberately separate wider read for "my contributions" — its rows must **not** go through `assertPublished`, which is why it is a different function rather than a flag.
+
+`conformance.test.ts` checks both lines of defence for every registered type: it seeds a proposal per type and checks it three ways — the scoped read excludes it, the *unscoped* read returns it (so the test cannot pass by the proposal never having been there), and the mapper throws on it. It needs a live database and **skips without one** — `bun run dev:infra` then `bun run test` is the combination that arms it, and CI should always be that combination. Breaking `publishedOnly` on purpose fails 16 of its cases, which is the only evidence that a guard test is worth anything.
 
 ### Testing against a real database
 

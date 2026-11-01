@@ -1557,3 +1557,14 @@ code**, not just gaps.
   with or without its date; the preview of a living person is the name only; a moderator worklist
   surfaces people born over 100 years ago with no death date, to be resolved by hand.
 
+### Open from building `propose` and the merge
+
+Decisions the code had to take to exist at all, marked **(?)** where they want confirming
+rather than inheriting. Each is a small change either way; none is load-bearing yet.
+
+- **Day-one roles and grants are not seeded (?)** — the vocabulary and roles are decided
+  (§4.4) but nothing creates them in a fresh database: a migration carrying data, or a
+  bootstrap command run once? The first admin needs the same answer.
+- **The permission vocabulary is a free string** — `place:moderat` fails closed, which is
+  safe, but would compile. §3 puts permission definitions in `shared`; a typed union there
+  would make a misspelling a type error.

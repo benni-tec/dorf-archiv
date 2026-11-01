@@ -1,6 +1,10 @@
 import { createApp } from "./app";
 import { EnvError, loadEnv } from "./config/env";
 import { createDatabase } from "./persistence/db/client";
+import {
+	permissionsOfUser,
+	publicPermissions,
+} from "./persistence/repository/permissions";
 import { createStorage } from "./persistence/storage/client";
 
 /**
@@ -33,6 +37,15 @@ const app = createApp({
 	probes: {
 		database: database.probe,
 		storage: storage.probe,
+	},
+	guards: {
+		resolution: {
+			publicPermissions: () => publicPermissions(database.db),
+			permissionsOfUser: (userId) => permissionsOfUser(database.db, userId),
+		},
+		// TODO(auth, PLAN.md §8 step 3): read the session. Until there are sessions every
+		// caller is anonymous, which is true rather than a stand-in.
+		identify: async () => null,
 	},
 });
 
