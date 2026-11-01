@@ -17,7 +17,7 @@
 		"build": "tsc",
 		"dev": "bun --watch --env-file=../.env run src/index.ts & tsc --watch",
 		"type-check": "tsc --noEmit",
-		"test": "bun test",
+		"test": "bun --env-file=../.env test --timeout 30000",
 		"db:generate": "bun --env-file=../.env ../../node_modules/drizzle-kit/bin.cjs generate",
 		"db:migrate": "bun --env-file=../.env ../../node_modules/drizzle-kit/bin.cjs migrate",
 		"db:studio": "bun --env-file=../.env ../../node_modules/drizzle-kit/bin.cjs studio"

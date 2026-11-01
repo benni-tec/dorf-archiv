@@ -61,8 +61,9 @@ export const entity = pgTable(
 	},
 	(table) => [
 		index("entity_type_idx").on(table.type),
-		// A versioned type must not be published without a version, and an unversioned type
-		// must never acquire one.
+		// Only that a version number is a real one. Which *types* may have a version at all
+		// is not expressible here — it would need the discriminator in the predicate — so the
+		// comment used to claim an enforcement that was not there.
 		check(
 			"entity_published_version_positive",
 			sql`${table.version} IS NULL OR ${table.version} >= 1`,
@@ -98,16 +99,50 @@ export function auditColumns() {
 }
 
 /**
+ * The three columns every content row carries — PLAN.md §2.2.
+ *
+ * `version` and `proposal_id` together are the whole versioning mechanism: proposal rows and
+ * published rows live side by side in one table, told apart by `proposal_id IS NULL`.
+ *
+ * A helper rather than three lines copied into each of a dozen tables, because getting it
+ * wrong in one of them is not a typo — it is §4.6 #1, publishing unmoderated content.
+ */
+export function contentRowColumns() {
+	return {
+		entityId: uuid()
+			.notNull()
+			.references(() => entity.id),
+		/** Null on a pending proposal; set once the row is published or incorporated. */
+		version: integer(),
+		/** Null means published. **A read that forgets this returns proposals to the public.** */
+		proposalId: uuid().references(() => proposal.id),
+	};
+}
+
+/**
+ * Rejects the one `(proposal_id, version)` combination that has no meaning: both null.
+ *
+ * Such a row belongs to no proposal and no version, is unreachable by any read path, and
+ * would sit in the table forever looking like published content to a query that checked only
+ * `proposal_id IS NULL`.
+ */
+export function versionOrProposalCheck(table: string) {
+	return check(
+		`${table}_version_or_proposal`,
+		sql.raw("version IS NOT NULL OR proposal_id IS NOT NULL"),
+	);
+}
+
+/**
  * An account. Descends from `Entity` directly — identity and audit, no versions.
  *
- * Two flags, independent of each other (PLAN.md §4.4):
+ * **What an account may do is role grants, never a flag here** (PLAN.md §4.4): verifying an
+ * email grants `member`, and an admin grants `approved` for people-data. A grant records who
+ * and when and keeps its history; a boolean would not, and "who approved this account" is a
+ * question the KUG posture depends on answering.
  *
- * - `emailVerified` is automatic and gates *contributing*;
- * - `approved` is a manual moderator action and gates *seeing people-data*, because email
- *   verification only proves someone owns an inbox, which is no barrier to a scraper, and
- *   the gated material is exactly the KUG-sensitive content.
- *
- * `approved` defaults to false, and §4.6 #6 names a truthy default as a fail-open hazard.
+ * `email` and `emailVerified` are better-auth's facts and move to its `auth_user` table when
+ * auth lands, leaving this row the identity and an `auth_user_id` (§11).
  */
 export const user = pgTable("user", {
 	entityId: uuid()
@@ -118,7 +153,6 @@ export const user = pgTable("user", {
 	alias: text().notNull(),
 
 	emailVerified: boolean().notNull().default(false),
-	approved: boolean().notNull().default(false),
 
 	...auditColumns(),
 });

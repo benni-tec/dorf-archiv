@@ -1,12 +1,11 @@
-import { sql } from "drizzle-orm";
+import { type SQL, sql } from "drizzle-orm";
 import {
+	boolean,
 	check,
 	index,
-	integer,
 	pgTable,
 	text,
 	uniqueIndex,
-	uuid,
 } from "drizzle-orm/pg-core";
 import {
 	daterange,
@@ -14,7 +13,11 @@ import {
 	searchVectorExpression,
 	tsvector,
 } from "./columns";
-import { auditColumns, entity, proposal } from "./entity";
+import {
+	auditColumns,
+	contentRowColumns,
+	versionOrProposalCheck,
+} from "./entity";
 import { dateGranularity } from "./enums";
 
 /**
@@ -31,14 +34,7 @@ import { dateGranularity } from "./enums";
 export const person = pgTable(
 	"person",
 	{
-		entityId: uuid()
-			.notNull()
-			.references(() => entity.id),
-
-		/** Null on a pending proposal; set once the row is published or incorporated. */
-		version: integer(),
-		/** Null means published. **A read that forgets this returns proposals to the public.** */
-		proposalId: uuid().references(() => proposal.id),
+		...contentRowColumns(),
 
 		/**
 		 * A birth happens once, so this is a single rough date: "1890er" is *granularity*,
@@ -48,15 +44,18 @@ export const person = pgTable(
 		bornGranularity: dateGranularity(),
 
 		/**
-		 * **Absent means living**, not unknown — a deliberate assertion rather than a gap,
-		 * which is what makes the field authoritative instead of ambiguous and removes any
-		 * need for an `isAlive` flag that could disagree with it.
+		 * **Not deceased means living**, not unknown — a deliberate assertion rather than a
+		 * gap. It fails in the safe direction for the living-person gate (§4.4): someone whose
+		 * death simply has not been researched is treated as alive and therefore gated, so
+		 * the error is over-protection and the fix is data entry — work the archive wants
+		 * doing anyway. Nothing infers death from age; a moderator records it by hand.
 		 *
-		 * It also fails in the safe direction for the living-person gate (§4.4): someone
-		 * whose death simply has not been researched is treated as alive and therefore
-		 * gated, so the error is over-protection and the fix is data entry — work the
-		 * archive wants doing anyway.
+		 * A flag as well as `died` because a death can be known without its date, and a
+		 * decade picked to stand in for "some time" would be invented precision. The check
+		 * below stops the two disagreeing: a death date implies deceased.
 		 */
+		deceased: boolean().notNull().default(false),
+		/** Null on a deceased person means the date is unknown — not that they are alive. */
 		died: daterange(),
 		diedGranularity: dateGranularity(),
 
@@ -82,24 +81,23 @@ export const person = pgTable(
 			"person_died_granularity_paired",
 			sql`(${table.died} IS NULL) = (${table.diedGranularity} IS NULL)`,
 		),
+		check(
+			"person_died_implies_deceased",
+			sql`${table.died} IS NULL OR ${table.deceased}`,
+		),
 		// Nobody dies before they are born. Rough spans may touch but must not overlap.
 		check(
 			"person_died_after_born",
 			sql`${table.born} IS NULL OR ${table.died} IS NULL OR upper(${table.born}) <= lower(${table.died})`,
 		),
-		...versionOrProposalChecks("person"),
+		versionOrProposalCheck("person"),
 	],
 );
 
 export const personContent = pgTable(
 	"person_content",
 	{
-		entityId: uuid()
-			.notNull()
-			.references(() => entity.id),
-
-		version: integer(),
-		proposalId: uuid().references(() => proposal.id),
+		...contentRowColumns(),
 
 		/** BCP-47. One row per language; languages are peers (PLAN.md §2.4). */
 		language: text().notNull(),
@@ -121,11 +119,12 @@ export const personContent = pgTable(
 		 */
 		searchConfig: regconfig().notNull(),
 		searchVector: tsvector().generatedAlwaysAs(
-			(): ReturnType<typeof searchVectorExpression> =>
+			(): SQL =>
 				searchVectorExpression(
 					personContent.searchConfig,
 					personContent.name,
 					personContent.abstract,
+					personContent.description,
 				),
 		),
 
@@ -141,28 +140,6 @@ export const personContent = pgTable(
 		),
 		index("person_content_proposal_idx").on(table.proposalId),
 		index("person_content_search_idx").using("gin", table.searchVector),
-		...versionOrProposalChecks("person_content"),
+		versionOrProposalCheck("person_content"),
 	],
 );
-
-/**
- * The four `(proposal_id, version)` combinations of PLAN.md §2.2, as a constraint.
- *
- * | `proposal_id` | `version` | meaning |
- * | --- | --- | --- |
- * | NULL | set | published content of that version |
- * | set | NULL | pending or rejected proposal |
- * | set | set | proposal incorporated into that version |
- *
- * The fourth — both null — is the one that has no meaning: a row belonging to no proposal
- * and no version is unreachable by any read path, and would sit in the table forever looking
- * like published content to a query that checked only `proposal_id IS NULL`.
- */
-function versionOrProposalChecks(table: string) {
-	return [
-		check(
-			`${table}_version_or_proposal`,
-			sql.raw(`version IS NOT NULL OR proposal_id IS NOT NULL`),
-		),
-	];
-}

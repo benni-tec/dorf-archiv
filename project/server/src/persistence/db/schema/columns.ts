@@ -74,5 +74,22 @@ export const searchVectorExpression = (
 	config: AnyPgColumn,
 	name: AnyPgColumn,
 	abstract: AnyPgColumn,
-): SQL =>
-	sql`setweight(to_tsvector(${config}, coalesce(${name}, '')), 'A') || setweight(to_tsvector(${config}, coalesce(${abstract}, '')), 'B')`;
+	/**
+	 * The type's own long-form field — a story's body, a media caption, a source's citation
+	 * text. §5.2 bolds these as the reason a single shared content table was rejected, so
+	 * leaving them out of the index would make the very fields that justify the design the
+	 * only ones nobody can search for.
+	 */
+	...body: AnyPgColumn[]
+): SQL => {
+	const weighted = [
+		sql`setweight(to_tsvector(${config}, coalesce(${name}, '')), 'A')`,
+		sql`setweight(to_tsvector(${config}, coalesce(${abstract}, '')), 'B')`,
+		...body.map(
+			(column) =>
+				sql`setweight(to_tsvector(${config}, coalesce(${column}, '')), 'C')`,
+		),
+	];
+
+	return sql.join(weighted, sql` || `);
+};
