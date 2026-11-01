@@ -1495,6 +1495,22 @@ code**, not just gaps.
   its first and **a tag can only ever be published once**. Settled by dropping the slug:
   tags are addressed by id like every other entity (§5.2), so the column and its index go.
 
+- **What a proposal must carry in full** — *decided and built.* A proposal is the
+  entity's **complete state**, written whole by `propose`/`editProposal`
+  (`domain/proposing.ts`); publishing is a **three-way merge** of base, proposal and head
+  over registry-driven parts (`domain/merge.ts`, `MERGE_PARTS`); a published language
+  cannot be dropped; the link set is derived from the merged bodies; and the moderation
+  review rehearses the publish in a rolled-back transaction rather than predicting it.
+  Granularity chosen while building it: the type row, each language and the `media_file`
+  set merge **whole**; tags and citations merge **element by element**. `media_file` is
+  whole because its rows constrain each other (one primary, one order).
+
+- **Combining several proposals into one version** — *built*: `publishAll` merges an
+  entity's proposals in creation order into one version; proposals touching disjoint parts
+  combine cleanly. A conflict is resolved by a moderator **rebasing** the proposal onto the
+  head (`editProposal(…, { rebaseTo })`) and restating it — there is no per-part
+  "pick a side" operation yet (see below).
+
 - **Entity chip syntax** — *decided:* `:entity{#<uuid>}`, the id and nothing else. No
   stored label: the chip renders the entity's current name in the reader's language, or a
   placeholder when the reader may not preview it, so a name can neither go stale nor leak
@@ -1562,15 +1578,30 @@ code**, not just gaps.
 Decisions the code had to take to exist at all, marked **(?)** where they want confirming
 rather than inheriting. Each is a small change either way; none is load-bearing yet.
 
+- **Conflicts are resolved by rebasing only (?)** — a moderator restates the proposal
+  against the head (`editProposal(…, { rebaseTo })`) and the merge has nothing left to
+  disagree about. There is no per-part "take theirs / take mine". Enough for a first
+  moderation UI, or does `ProposalDiff` need the per-part choice?
 - **A proposal that changes nothing is refused at publish (?)** — "everything proposed is
   already there; reject it instead". Rejecting needs a reason, which here is a chore. The
   alternative is to accept and close it without minting a version.
+- **Chips only on types that have links (?)** — a tag's abstract or the terms' body may not
+  reference entries, because `Link` belongs to `HistoricEntity` (§2.1). Fine for tags; the
+  terms might one day want to point at an entry.
 - **`abstract` is directive-Markdown (?)** — the rule is "every content text field except
   `name`", so an abstract may hold chips and they render in previews and search hits. The
   other reading is that an abstract is plain text, like a name.
 - **A labelled chip is refused, not repaired** — `:entity[Josef]{#…}` gets an error rather
   than having its label silently dropped by canonicalisation. Revisit if pasting into the
   editor turns out to produce them routinely.
+- **Who may reference what** — published entries, plus unpublished ones created by the
+  proposal's author or by whoever is editing it (so a photo can be proposed with its new
+  Place, and a moderator can still edit that proposal). Anything else gets the same refusal
+  whether it exists or not. Open **(?)**: whether referencing a published entry should also
+  require `<type>:preview` on it — today the id is enough.
+- **Which files may be attached (?)** — uploads by the author or editor, or files already
+  published on *this* entity. Reusing a file published on another entry (one scan, two
+  media entries) is refused; say if that is a case.
 - **Rehearsing holds the entity's lock (?)** — reviewing a proposal runs the real publish in
   a rolled-back transaction, so it takes the same `FOR UPDATE` on the entity and needs an
   account actor. Reviews are moderator-only and short, so this seems fine; a busy queue
@@ -1592,7 +1623,14 @@ rather than inheriting. Each is a small change either way; none is load-bearing 
 - **Every moderation operation checks `<type>:moderate` itself** (`maySettle`) — a route
   given a proposal id cannot know which type it is for, so the route's own declaration is
   necessary but not sufficient. Not-allowed reads as not-there.
+- **A rebase without restating the draft is a footgun (?)** — moving a proposal onto a newer
+  version while keeping its old state makes everything that landed meanwhile look like the
+  proposer's own reversion. The review shows it; nothing warns. The UI should rebase only
+  together with an edited draft, or the operation should refuse a bare rebase.
 - **`findPublished`, `findVersion` and `history` take an actor they do not use yet** —
   correct while every published entry's existence is public, but it is the §4.6 #7 shape:
   the day a type's preview is not public, these are where it leaks first. (`backlinks` and
   search do use it.)
+- **Proposal locking is reasoned, not tested** — publish, reject and edit all lock the
+  proposal row (`FOR UPDATE`) so whichever waits sees the decision; there is no concurrent
+  test proving it.
