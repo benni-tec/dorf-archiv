@@ -1562,9 +1562,37 @@ code**, not just gaps.
 Decisions the code had to take to exist at all, marked **(?)** where they want confirming
 rather than inheriting. Each is a small change either way; none is load-bearing yet.
 
+- **A proposal that changes nothing is refused at publish (?)** — "everything proposed is
+  already there; reject it instead". Rejecting needs a reason, which here is a chore. The
+  alternative is to accept and close it without minting a version.
+- **`abstract` is directive-Markdown (?)** — the rule is "every content text field except
+  `name`", so an abstract may hold chips and they render in previews and search hits. The
+  other reading is that an abstract is plain text, like a name.
+- **A labelled chip is refused, not repaired** — `:entity[Josef]{#…}` gets an error rather
+  than having its label silently dropped by canonicalisation. Revisit if pasting into the
+  editor turns out to produce them routinely.
+- **Rehearsing holds the entity's lock (?)** — reviewing a proposal runs the real publish in
+  a rolled-back transaction, so it takes the same `FOR UPDATE` on the entity and needs an
+  account actor. Reviews are moderator-only and short, so this seems fine; a busy queue
+  would show it first.
+- **Concurrent "publish all" can deadlock** — two moderators publishing overlapping sets
+  lock entities in different orders, and Postgres aborts one. The controller should retry
+  once; the alternative is locking every entity of the set up front in id order.
+- **A moderator publishing their own proposal (?)** — nothing stops a moderator publishing
+  what they proposed themselves. Whether moderation needs a second pair of eyes is a
+  governance question, not a technical one.
 - **Day-one roles and grants are not seeded (?)** — the vocabulary and roles are decided
   (§4.4) but nothing creates them in a fresh database: a migration carrying data, or a
   bootstrap command run once? The first admin needs the same answer.
 - **The permission vocabulary is a free string** — `place:moderat` fails closed, which is
   safe, but would compile. §3 puts permission definitions in `shared`; a typed union there
   would make a misspelling a type error.
+- **Still unbuilt from §3** — the editor projections `toEditor` / `fromEditor` and
+  `protectForTranslation`; they arrive with the client editor and with translation.
+- **Every moderation operation checks `<type>:moderate` itself** (`maySettle`) — a route
+  given a proposal id cannot know which type it is for, so the route's own declaration is
+  necessary but not sufficient. Not-allowed reads as not-there.
+- **`findPublished`, `findVersion` and `history` take an actor they do not use yet** —
+  correct while every published entry's existence is public, but it is the §4.6 #7 shape:
+  the day a type's preview is not public, these are where it leaks first. (`backlinks` and
+  search do use it.)

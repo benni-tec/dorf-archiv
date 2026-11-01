@@ -2,6 +2,7 @@ import { getTableColumns } from "drizzle-orm";
 import { toSnakeCase } from "drizzle-orm/casing";
 import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
 import { PLAIN_TEXT_CONTENT_FIELDS } from "../../../domain/entity";
+import type { PartKind } from "../../../domain/merge";
 import { link } from "./link";
 import { media, mediaContent, mediaFile } from "./media";
 import { person, personContent } from "./person";
@@ -179,6 +180,74 @@ export const VERSIONED_CONTENT_TABLES: readonly PgTable[] = [
 	terms,
 	termsContent,
 	link,
+];
+
+/**
+ * How each table holding a version's rows takes part in the three-way merge (PLAN.md §11,
+ * `domain/merge.ts`), and which columns identify a part within the entity.
+ *
+ * **A proposal is a complete state**, so publishing compares base, proposal and head part by
+ * part and writes the new version by copying each part's rows from whichever side won.
+ *
+ * - `own` — the type's row: one per version, so the entity is the whole key.
+ * - `language` — one row per language (§2.4); a proposal may not drop one.
+ * - `member` — set elements merged one by one: two proposals adding different tags keep both.
+ * - `set` — merged whole, because its elements constrain each other: `media_file` has one
+ *   primary and one sort order, and merging two edits of them element by element could
+ *   produce a version with two primaries.
+ *
+ * `link` is absent on purpose: it is **derived**, never merged. The link set is exactly the
+ * chips in a version's bodies (§2.6), so it is recomputed from the merged bodies — merging
+ * it separately could leave a chip in a body with no link, or a link with no chip.
+ *
+ * `registry.test.ts` checks every table carrying `proposal_id` is either here or derived.
+ */
+export const MERGE_PARTS: readonly {
+	table: PgTable;
+	kind: PartKind;
+	/** Beyond `entity_id`: what makes two rows the same part across versions. */
+	keyColumns: readonly string[];
+}[] = [
+	...ENTITY_REGISTRY.flatMap((item) => [
+		{ table: item.table, kind: "own" as const, keyColumns: [] },
+		...(item.contentTable
+			? [
+					{
+						table: item.contentTable,
+						kind: "language" as const,
+						keyColumns: ["language"],
+					},
+				]
+			: []),
+	]),
+	{ table: entityTag, kind: "member", keyColumns: ["tag_entity_id"] },
+	{
+		table: citation,
+		kind: "member",
+		keyColumns: ["source_entity_id", "locator"],
+	},
+	{ table: mediaFile, kind: "set", keyColumns: [] },
+];
+
+/** Tables whose rows are computed from the rest of a version rather than merged. */
+export const DERIVED_TABLES: readonly PgTable[] = [link];
+
+/**
+ * Columns of a version's rows that are bookkeeping rather than content, and so take no part
+ * in deciding whether two parts are the same.
+ *
+ * `search_config` is here because it is set from a setting at write time (§4.3): a proposal
+ * written before the setting changed has not edited anything by carrying the old one.
+ */
+export const NON_CONTENT_COLUMNS: readonly string[] = [
+	"entity_id",
+	"version",
+	"proposal_id",
+	"created_at",
+	"created_by",
+	"updated_at",
+	"updated_by",
+	"search_config",
 ];
 
 /**
