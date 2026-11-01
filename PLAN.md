@@ -1615,11 +1615,25 @@ rather than inheriting. Each is a small change either way; none is load-bearing 
 - **Day-one roles and grants are not seeded (?)** — the vocabulary and roles are decided
   (§4.4) but nothing creates them in a fresh database: a migration carrying data, or a
   bootstrap command run once? The first admin needs the same answer.
+- **A changed `TEXT_SEARCH_CONFIG` orphans existing rows (?)** — each content row records the
+  configuration it was indexed with, and a query matches only rows with its own. Switching
+  the setting needs a reindex job; none exists.
 - **The permission vocabulary is a free string** — `place:moderat` fails closed, which is
   safe, but would compile. §3 puts permission definitions in `shared`; a typed union there
   would make a misspelling a type error.
+- **Search ranking through links (?)** — a match through a link ranks at half a direct one,
+  in the linking entry's original language. Both are guesses to tune on real data.
 - **Still unbuilt from §3** — the editor projections `toEditor` / `fromEditor` and
   `protectForTranslation`; they arrive with the client editor and with translation.
+- **Search matches only what the reader may read** — with `<type>:view`, a row's full text;
+  with only `<type>:preview`, its preview fields (`PREVIEW_FIELDS` in `domain/entity.ts`),
+  so a gated description can neither be found nor be the reason a story linking to the
+  person is. **Links are followed only from entries the reader may view** — a link can come
+  from gated prose, so following one from a preview-only entry would reveal what that prose
+  says. `backlinks` applies the same rule. **A person's preview is the name only (?)**, for every person: nothing yet
+  tells search which people are alive, so dead people's abstracts are held back too. When
+  the preview projection is built it should use the same `PREVIEW_FIELDS`, so the two
+  cannot disagree. The preview-only half is computed per query, not indexed.
 - **Every moderation operation checks `<type>:moderate` itself** (`maySettle`) — a route
   given a proposal id cannot know which type it is for, so the route's own declaration is
   necessary but not sufficient. Not-allowed reads as not-there.
