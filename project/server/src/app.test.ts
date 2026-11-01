@@ -4,8 +4,17 @@ import { createApp } from "./app";
 const ok = () => Promise.resolve();
 const fail = () => Promise.reject(new Error("connection refused"));
 
+// The health route is exempt, so it must answer without ever consulting these.
+const unreachableGuards = {
+	resolution: {
+		publicPermissions: fail,
+		permissionsOfUser: fail,
+	},
+	identify: async () => null,
+};
+
 const appWith = (probes: Parameters<typeof createApp>[0]["probes"]) =>
-	createApp({ probes });
+	createApp({ probes, guards: unreachableGuards });
 
 describe("GET /health", () => {
 	test("answers 200 with a per-dependency report when everything is up", async () => {
