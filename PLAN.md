@@ -69,10 +69,7 @@ classDiagram
         +UserId updated_by
     }
     class User {
-        +Email email
         +string alias
-        +bool emailVerified
-        +bool approved
     }
     class Thread {
         +int on_version
@@ -112,9 +109,7 @@ classDiagram
         +string identifier
         +DateOrInterval published
     }
-    class Tag {
-        +string slug
-    }
+    class Tag
     class TermsAndConditions {
         +CalendarDate effectiveFrom
     }
@@ -366,6 +361,9 @@ its own gate.
 - **A version snapshots all languages together.** A version is "the complete state of this
   record at time T", which is what you cite. A French typo fix bumps the version the
   German shares; the diff view makes it obvious what actually moved.
+- **A language, once published, cannot be removed by a proposal.** A proposal is a
+  complete state (§11), so leaving a language out would read as deleting it; that is
+  refused instead. Content that must go is a redaction (§2.2a), not an edit.
 - Missing languages are **auto-translated at read**, cached persistently, keyed by
   `(entity, field, target language, hash of the original text)`. Hashing rather than
   version-counting means an edit to the original silently retires everything derived from
@@ -552,10 +550,11 @@ and no description. Anything explanatory belongs in the entity's body, where it 
 that can be translated, sourced and argued with. **The link exists for SQL-based discovery
 only** — backlinks, "what references this", graph traversal — not for display semantics.
 
-**Every reference in the body must appear in the link set.** The content module guarantees
-that on save: parse each language's body, collect the directive targets, union them into
-the set. Links may also exist without appearing in any prose. Targets are deduplicated —
-mentioning a person three times, or in three languages, is one link.
+**The link set is exactly the references in the bodies — derived, never authored.** The
+content module computes it on save: parse each language's body, collect the directive
+targets, and that is the set. There are no links outside the prose, so the client never
+sends links and nothing has to tell a derived link from a deliberate one. Targets are
+deduplicated — mentioning a person three times, or in three languages, is one link.
 
 Keeping it this bare is what makes it useful. A link table with kinds and labels invites
 queries that need to interpret them; a set of `(entity, target)` pairs answers "what touches
@@ -656,9 +655,18 @@ extractLinks(Doc) → Ref[]    protectForTranslation(Doc) → { text, placeholde
 ```
 
 Framing it as two parsers is what makes divergence possible; with one canonical form there
-is nothing to diverge *from*. It also hands us the test surface for free — `serialize(parse(x)) === x`
-and `toEditor`/`fromEditor` round-trips are property tests, which is the cheapest strong
-guarantee available for a format that stored content depends on.
+is nothing to diverge *from*. It also hands us the test surface for free — canonical form is
+a fixed point, and the `toEditor`/`fromEditor` round-trips are property tests, which is the
+cheapest strong guarantee available for a format that stored content depends on.
+
+`serialize(parse(x)) === x` does **not** hold, and cannot: Markdown has many spellings of one
+document (`__bold__` and `**bold**`, `*` and `-` bullets) and the serializer writes one of them.
+What holds is `normalize(normalize(x)) === normalize(x)`, so **stored bodies are canonical** —
+the server normalises on save, which also makes a diff between versions show what changed
+rather than how it was typed. Two findings from building it (`shared/src/content`):
+`remark-directive` reads ordinary prose colons ("10:30 Uhr", "Hinweis:Text") as directives, so
+`parse` turns every directive but a chip back into text; and its serializer escapes those
+colons, so chips are written by a handler of our own rather than by it.
 
 **Rule:** every write goes through the server's domain layer, never raw SQL — versioning,
 the closure invariant and link extraction are all enforced there.
@@ -675,7 +683,8 @@ the closure invariant and link extraction are all enforced there.
 | Database | **Postgres**, reached by connection string; hosting unspecified |
 | Object storage | **S3-compatible API**, reached by connection string; provider unspecified |
 | ORM | **Drizzle** |
-| Auth | **better-auth**, magic link |
+| Auth | **better-auth**, magic link — the only login method, for signup and every login alike |
+| Mail | **Plain SMTP**, configured by an admin at runtime; no provider SDK (§11) |
 | Local dev | Client and server run **from source on the host**; Compose supplies backing services |
 | Config | All connection parameters as **environment variables** |
 
@@ -683,7 +692,7 @@ the closure invariant and link extraction are all enforced there.
 shapes all have to work from the same source and the same configuration mechanism:
 
 1. **Development** — client and server run from source on the host with hot reload, while
-   Compose provides Postgres and Garage. No containerized app in the loop; waiting on an
+   Compose provides Postgres and SeaweedFS. No containerized app in the loop; waiting on an
    image rebuild to see a change is not a dev experience anyone should accept.
 2. **Compose as production** — the whole stack containerized on one box, self-contained.
    A perfectly legitimate deployment, not merely a development convenience.
@@ -707,8 +716,8 @@ can reasonably satisfy it:
 
 **Two separate Compose files, no profiles, and neither includes the other.**
 
-- `project/compose.dev.yml` — Postgres, Garage, bucket initialisation, pgAdmin, **every
-  one of them published on loopback**. This is what development runs against, with the
+- `project/compose.dev.yml` — Postgres, SeaweedFS, pgAdmin, **every one of them published
+  on loopback**. This is what development runs against, with the
   client and server from source on the host.
 - `project/compose.yml` — the full stack, application and proxy included, **publishing
   nothing but the proxy**. The database has no route through it at all; a human reaches
@@ -740,10 +749,10 @@ the same on Windows and Linux.
 Important: teardown is `down` **without `-v`**. Volumes are named and survive, so stopping
 the dev stack must never wipe the local database.
 
-Two details that otherwise cost an afternoon each: the Compose stack needs a **one-shot
-bucket-initialisation service** or first-run dev requires setting the object store up by
-hand — with Garage that is not merely tedious but required, since a node with no cluster
-layout assigned stores nothing at all, and the **dev Postgres image should carry the Hunspell dictionary** so local
+Two details that otherwise cost an afternoon each: the object store must **come up with its
+key and bucket already in place**, or first-run dev requires setting it up by hand —
+SeaweedFS does both from environment variables on every start, so there is no init
+service — and the **dev Postgres image should carry the Hunspell dictionary** so local
 search behaves like a good production rather than silently better or worse. Migrations run
 from the host via Drizzle, not from inside a container.
 
@@ -788,14 +797,47 @@ appears in the church book finds nothing.
 
 ### 4.4 Authorization
 
-Permissions are **entity type × action** — `person:view`, `media:propose`,
-`place:publish` — as a small in-house module (~50 lines), no library. Two flags on an
-account, independently:
+Permissions are **`<scope>:<action>`** — a scope is an entity type or a system area — as
+a small in-house module (~50 lines), no library:
 
-- `emailVerified` — automatic, gates contributing.
-- `approved` — a manual moderator action, gates seeing people-data. Email verification
-  proves someone owns an inbox, which is no barrier to a scraper, and the gated material
-  is exactly the KUG-sensitive content.
+| permission | covers |
+| --- | --- |
+| `<type>:preview` | the preview endpoint, the index, search hits |
+| `<type>:view` | the full endpoint |
+| `<type>:propose` | creating and editing one's own proposals |
+| `<type>:moderate` | publishing, rejecting, editing others' proposals — one action, since a moderator who could publish but not reject would publish to clear the queue |
+| `comment:post`, `comment:moderate` | threads (§2.8) |
+| `account:approve` | approving an account for people-data |
+| `role:manage` | granting and revoking roles, public grants included |
+| `version:redact` | legal redaction (§2.2a), deliberately apart from moderating |
+| `setting:manage` | runtime settings and secrets (§11) |
+
+Roles on day one:
+
+| role | holds |
+| --- | --- |
+| *public* (`role_id IS NULL`) | `:preview` on every type; `:view` on place, media, story, source, tag |
+| `member` | `:propose` on every type, `comment:post` |
+| `approved` | `person:view`, `relationship:view` — the people-data |
+| `moderator` | `:moderate` on every type, `comment:moderate` |
+| `admin` | `account:approve`, `role:manage`, `version:redact`, `setting:manage` |
+
+**Living people.** A person is living **unless their death is recorded** — no age
+cutoff, no inference from a birth date. A death may be recorded without its date
+(`deceased` with no `died`), since picking a decade to stand in for "some time" would be
+invented precision. That fails safe: someone whose death was never
+researched is treated as alive, and the fix is data entry, helped along by a moderator
+worklist of people born over 100 years ago with no death date (§6, `ProbablyDeceasedList`).
+A living person's full record needs `person:view`, which only `approved` holds; their
+**public preview shows the name only** — no dates, no relationships, and no photo beyond
+what is published in its own right.
+
+**Account states are role grants, not flags.** Verifying an email **auto-grants `member`**
+(granted by the system); `emailVerified` stays only as better-auth's own fact.
+**`approved` is a role an admin grants** — email verification proves someone owns an
+inbox, which is no barrier to a scraper, and the gated material is exactly the
+KUG-sensitive content. As a grant it gets who, when and revocation history for free, which
+a boolean would need rebuilding. Approving accounts is **admin-only**, not moderation.
 
 better-auth's access-control plugin handles **platform roles** (admin/moderator/member)
 only; it is purely role-based and cannot express conditions. **Role grants and account
@@ -889,35 +931,56 @@ to render without a round-trip per element. That is UX, not security: the server
 
 ### 4.5 Images
 
-**All of the discipline below lives behind one module** — roughly
-`processUpload(file, corners) → { original, web, thumb, exif }` — and no component
-allocates a canvas directly. The clamping and release rules are the kind that get
-reimplemented in three places, with one of them forgetting, and the failure is silent
-(`getContext` returning `null`) rather than loud.
+**Derivatives are made on the server, not the phone.** The phone uploads the original
+and, for a scanned print, four crop corners; the server does everything else, behind one
+module — roughly `ingest(upload, corners?) → { original, web, thumb, exif }` — used alike
+on ingest, for regeneration and for batch work.
 
-Client-side for the upload path — it saves bandwidth on village 3G and the crop/deskew UI
-needs the bitmap anyway. Server-side is available again for derivative regeneration,
-format migration and batch work.
+This reverses an earlier client-side design, whose two reasons did not survive a look:
 
-The mobile constraint that must be designed around: **iOS caps total canvas area at
-4096×4096 (16.7M px)**, so a 48MP iPhone photo fails — and `getContext('2d')` returns
-`null` rather than throwing. There is also a ~384MB total canvas-memory ceiling that
-Safari frees lazily. Therefore:
+- **Bandwidth** — the untouched original is uploaded either way, so derivatives made on the
+  phone are *extra* upload, not a saving.
+- **The crop UI needs the bitmap** — it needs a *screen-sized preview* to place four
+  corners on, which sits comfortably inside iOS's canvas cap (4096×4096). It never needed
+  the full-resolution bitmap, and the server never has a canvas cap at all, so a 48 MP
+  photo is no longer a special case.
 
-- Decode via an `<img>` element (not canvas-capped) and `drawImage` **scaled down** into a
-  canvas clamped to ~3000px on the long edge. Never allocate at source resolution.
-- Reuse one canvas rather than chaining source → intermediate → destination; release by
-  shrinking to 1×1.
-- The **untouched original uploads directly to storage, never touching a canvas.**
-- EXIF orientation is applied on decode — read EXIF for date/GPS on a separate path and
-  never re-apply rotation, or you ship sideways photos.
-- **Strip EXIF server-side on ingest.** A contributor photographing a print at home embeds
-  their house's GPS coordinates. "The browser was supposed to strip it" is not a control —
-  a bulk path or a client bug bypasses it silently.
+| | long edge | format |
+| --- | --- | --- |
+| `original` | as uploaded | as uploaded, metadata stripped |
+| `web` | 2000 px | WebP |
+| `thumb` | 400 px | WebP |
+
+Encoding is libvips through **`sharp`** — WebP and AVIF alike, so no browser's encoder
+support matters. Quality settings are tuned once real scans exist. Because the original is
+always kept, a later format or size change is a batch regeneration, not a re-upload.
+
+The rules:
+
+- **The phone uploads to a staging key**, never to the original's final key. Ingest writes
+  the original **with its metadata stripped** — losslessly where the format allows,
+  dropping the metadata segments rather than re-encoding — plus the derivatives, and then
+  deletes the staging blob. A contributor photographing a print at home embeds their
+  house's GPS coordinates; "the browser was supposed to strip it" is not a control.
+- **Orientation is applied once, on the server**, before stripping. The corners arrive
+  **normalised to 0–1 in the oriented image**, so the preview's size on the phone is
+  irrelevant and nothing is rotated twice.
+- **Perspective correction is ours to write.** `sharp` does affine transforms but not a
+  four-corner warp, so the homography is applied to raw pixels — small, and the sort of
+  thing a property test pins down.
+- **Ingest is asynchronous.** The proposal shows the file as processing until derivatives
+  exist; a moderator only ever reviews the finished result.
+- **The phone may still read EXIF** — capture date, GPS — to *prefill* the form, as a
+  suggestion the contributor confirms. Reading is harmless; trusting it unconfirmed is not,
+  since a photographed print carries the date and place of the photographing.
 - **The bucket is private.** Files reach the browser only through short-lived presigned
   URLs the backend issues after a permission check. Unpublished blobs sit in storage from
   the moment of upload, so a public bucket policy or a guessable key would bypass
   moderation entirely (§4.6 #3).
+
+To verify before relying on it: **`sharp` under Bun**, in the server image as well as on
+the host; and **HEIC** — iPhones may upload it, and `sharp`'s prebuilt libvips reads AVIF
+but not HEVC-coded HEIC, which may need converting on the phone or a custom libvips build.
 
 Auto edge detection (the scanner-app feel) is a **nice-to-have**, deferred: OpenCV.js is a
 multi-megabyte WASM payload, a poor trade on mobile data. Manual four-corner crop first.
@@ -935,9 +998,9 @@ access or more publication. Each needs a structural guard, not vigilance.
 | 1 | **Forgetting `proposal_id IS NULL`** returns proposals alongside published rows — publishing unmoderated content, the one thing the design forbids | Base tables are read *only* inside the repository; the row→domain mapper **asserts** `proposal_id` is null and throws otherwise. Backed by a registry-driven conformance test (see #5): for every registered entity type, seed a proposal and assert every read path excludes it — so new entity types are covered without anyone remembering |
 | 2 | **Preview DTOs built by omission** (`{...entity, description: undefined}`) leak every field added later | Build by explicit `pick`. A new field is invisible until deliberately exposed |
 | 3 | **Unpublished blobs are in storage** before any moderator sees them; a public bucket or guessable key bypasses moderation entirely via direct URL | Private bucket, unguessable keys, and access only via **short-lived presigned URLs** issued by the backend after a permission check. Note a presigned URL is a bearer token for its lifetime — keep the TTL short, never log or embed them, and accept that redaction cannot recall one already issued |
-| 4 | **Rendering a chip from its stored Markdown label** would show a redacted person's name wherever it was referenced | Chips always render from the **linked entity**, never the stored label, so they reflect current state. The label text still exists in the stored Markdown, so redacting a *name* means editing the prose of prior versions — the exceptional path in §2.2a |
+| 4 | **Rendering a chip from a stored label** would show a redacted person's name wherever it was referenced | Chips **store no label** — `:entity{#<uuid>}` (§11) — and always render from the linked entity, so they reflect current state and redacting a name never means editing the prose that mentions it |
 | 5 | **The closure invariant as a hand-written loop** silently permits publishing once a fourth reference type exists | Iterate an **entity/reference registry**, so new types are covered by default. The same registry drives the conformance test in #1 — one structure, two guards |
-| 6 | **Column defaults**: a truthy `approved`, or a create path setting `published_version` eagerly | `approved NOT NULL DEFAULT false`; entities created with `published_version` null |
+| 6 | **Defaults that grant**: an auto-grant broader than `member`, or a create path setting `published_version` eagerly | Verification grants `member` and nothing else; `approved` is only ever granted by an admin; entities created with `published_version` null |
 | 7 | **Derived read paths** — backlinks, FTS, translation cache — are separate queries. Built on the base tables they'd expose proposals, superseded versions and gated text | Built on the views through **permission query handlers**, they inherit correctness by construction. Residual: permission-correct queries can still *compose* into a disclosure — published prose containing a chip that names a gated person — but that is a moderation judgement, not a query defect |
 | 8 | **`role_permission.role_id IS NULL`** grants to the entire internet (§4.4) | Public grants are their own service method; a nullable role id never arrives from request input |
 | 9 | **Permission resolution erroring** should never be read as "no restrictions" | Deny on error, explicitly |
@@ -1017,7 +1080,13 @@ Two caveats specific to this stack:
    is rejected at startup rather than served unguarded.
 
 DTO placement: response shapes reach the client through Hono RPC inference and need no
-duplication; request shapes the client must *construct* belong in `shared`.
+duplication; request shapes the client must *construct* belong in `shared`. Both are also
+declared as zod schemas on their route, because that is what the OpenAPI document is
+generated from (§5.4).
+
+The operations above are the domain's interface, not the HTTP one; §5.4 maps them onto
+resources. `draft` is the entity's **complete state** — every type field, every language,
+every set — never a delta (§11).
 
 ### 5.2 Tables
 
@@ -1045,7 +1114,8 @@ For this data that is already public in `created_at`.)
 | Table | Notes |
 | --- | --- |
 | `entity` | `id`, `type` (discriminator), audit quartet, plus nullable `version` and `original_language` — the collapsed spine (see below) |
-| `user` | `entity_id`, email, alias, `email_verified`, `approved` |
+| `user` | `entity_id`, `auth_user_id` (unique → better-auth's `auth_user`), alias. Email and `email_verified` live in `auth_user` only; approval is a role grant (§4.4) |
+| `auth_user`, `session`, `account`, `verification` | **better-auth's**, beside ours rather than mapped onto them (§11); ids generated by Postgres (`generateId: false`) |
 | `thread` | `entity_id`, target entity, `on_version` — the version the discussion is about |
 | `comment` | `entity_id`, `thread_id`, body, moderation status — an entity, ordered by its UUIDv7 `id` |
 | `entity_version` | `(entity_id, version)`, `published_at`, `published_by`, `redaction_reason` |
@@ -1083,7 +1153,7 @@ for what does — the latter keyed additionally by `language`, one row per langu
 
 | Table | Notes |
 | --- | --- |
-| `person` | `born`, `died` — nullable `Date` each; **`died IS NULL` means living**, which drives the §4.4 gate |
+| `person` | `born`, `died` — nullable `Date` each — and `deceased`. **`NOT deceased` means living**, which drives the §4.4 gate; `deceased` with no `died` is a death whose date is unknown, and a CHECK makes `died` imply `deceased` |
 | `person_content` | `language`, `name`, `abstract`, `description` |
 | `place` | point lat/lng, GeoJSON area, derived bbox, `valid_from` / `valid_until` (`Date?` each) |
 | `place_content` | `language`, `name`, `abstract`, `description` |
@@ -1095,12 +1165,12 @@ for what does — the latter keyed additionally by `language`, one row per langu
 | `relationship_content` | `language`, `name`, `abstract`, `description` |
 | `source` | `identifier`, `published` nullable `DateOrInterval` (a church book spans years) |
 | `source_content` | `language`, `name`, `abstract`, **citation text** |
-| `tag` | `slug` — the stable language-independent identifier; the label lives in `tag_content` |
+| `tag` | **no columns of its own for now** — the label lives in `tag_content`, and a tag is addressed by its entity id like everything else. Slugs were dropped rather than designed; if readable URLs are wanted later, an unversioned `tag_slug` alias table (unique `slug` → `entity_id`, old slugs kept as redirects) adds them without touching versions |
 | `tag_content` | `language`, `name`, `abstract` (**label only**, no description) |
 | `terms` | `effective_from` — which version was in force on a given date |
 | `terms_content` | `language`, `name`, `abstract`, **`body`** |
 | `entity_tag` | → tag entity |
-| `link` | `target_entity_id` only — no kind, no label. Unique on `(entity_id, version/proposal_id, target_entity_id)`; body references are unioned in on save (§2.6) |
+| `link` | `target_entity_id` only — no kind, no label. Unique on `(entity_id, version/proposal_id, target_entity_id)`; derived from the bodies on save, never sent by the client (§2.6) |
 | `citation` | → source entity + `locator` (page, date, timestamp) |
 | `media_file` | → `asset`, role (original/web/thumb), primary flag, sort |
 
@@ -1120,7 +1190,9 @@ rejected: they have no sensible home in a generic `name`/`abstract`/`description
 | `user_role` | user → role, both non-nullable, same temporal shape |
 | `user_person` | optional 1:1 account ↔ Person link; moderator-confirmed, with an opt-in `is_public` flag (§2.9) |
 | `terms_acceptance` | user, ToC entity + version, accepted at |
-| `notification_outbox` | queued emails |
+| `notification_outbox` | **every** outgoing mail, magic links included — recipient, template, payload, attempts, sent-at |
+| `setting` | admin-edited runtime settings (SMTP host, port, sender) — **not** deployment facts, which stay in env |
+| `secret` | admin-set secrets (SMTP password), AES-256-GCM-encrypted under `SECRETS_KEY` from env |
 | better-auth tables | via the Drizzle adapter |
 
 ### 5.3 Indexes that matter
@@ -1134,14 +1206,74 @@ rejected: they have no sensible home in a generic `name`/`abstract`/`description
 - btree on `place_content` bbox columns and `media_content` lat/lng for the viewport query.
 - btree on `(entity_id, version)` everywhere content rows are keyed.
 
-### 5.4 Routes, roughly
+### 5.4 Routes
 
-Public read (no auth, cacheable) · gated read (approved sessions) · propose · moderate
-(queue, diff, publish, reject, dependency resolution) · upload (direct-to-storage +
-metadata) · search · translate · notification dispatch.
+**REST-style resources, described by an OpenAPI document generated from the same zod
+schemas that validate them.** Hono RPC stays: it is a typed client over ordinary HTTP
+routes, not an alternative to REST, so `client.places[":id"].$get()` is simply
+`GET /places/:id` with inferred types. The OpenAPI description is what makes the API
+usable by anything other than our client — an import script, another village's tooling —
+and is cheap now and painful to retrofit. Every route is therefore declared with its
+request *and* response schemas (e.g. `@hono/zod-openapi`, whose routes still chain and
+still feed `hc`; check it works with our zod major and with the route guard before
+committing to it), and the document is served from the app itself.
+
+**Content is per type; workflow and discovery are generic.**
+
+Content routes exist once per type (`places`, `people`, `media`, `stories`, `sources`,
+`relationships`, `tags`) rather than as one `/entities` endpoint typed by a union, because:
+
+- **Permissions are per type and the guard is static.** A route declares
+  `requires("place:view")` before it runs; a generic route could not know its permission
+  until it had loaded the row to learn the type, moving the check from a startup-verified
+  route property into handler code — the shape §4.6's fail-open bugs take.
+- **No endpoint varies its shape** (§4.4) — a generic one returns a union of every type,
+  and each call site narrows something it already knew.
+- **A TypeScript interface is not a runtime check.** A generic write route would still need
+  a zod discriminated union to validate its body; per type, each route has one schema.
+- **The URLs are the client's pages** — the per-type indexes of §6.
+
+The repetition is avoided in code, not in the API: **one generic factory, driven by the
+entity registry, builds each type's chained controller** from a definition carrying its
+permission names, preview `pick`, state schema and repository.
+
+```
+GET  /places                      index — preview projection; bbox, date range, paging
+GET  /places/:id/preview          preview                         place:preview
+GET  /places/:id                  full content                    place:view, else 403
+GET  /places/:id/versions         history
+GET  /places/:id/versions/:n      a past version
+GET  /places/:id/backlinks        mixed-type result, scoped by the actor
+POST /places/proposals            propose a new place             { state }
+POST /places/:id/proposals        propose an edit                 { basedOnVersion, state }
+```
+
+Generic where the resource genuinely spans types:
+
+```
+GET  /entities/:id                resolve an id to { type, id } — chips and links carry no type
+GET  /proposals?status=pending    the moderation queue; a proposer's own contributions
+GET  /proposals/:id
+PUT  /proposals/:id               editProposal — a complete state, replacing the last
+GET  /proposals/:id/review        the diffs against base and head (§2.2a)
+POST /proposals/:id/rejection     { reason }
+POST /publications                { proposalIds } → the versions it created
+POST /uploads                     presigned URLs for original / web / thumb (§4.5)
+GET  /search?q=…&types=…
+```
+
+**Publishing creates a *publication*, not a version under one entity**, because "publish
+all" spans entities — a photo and its new Place — and is atomic. One proposal is the same
+call with one id.
+
+**A proposal's `state` is the entity's complete state**, never a delta — see §11. It is the
+request shape the client constructs, so its type lives in `shared`; `PUT` on a proposal
+replaces it whole, which is what `PUT` means. Bodies travel as directive Markdown, the
+stored form, so TipTap stays a client detail and the server parses what it stores.
 
 Every route declares the permission it requires; anonymous callers resolve to the public
 role set (§4.4). Nothing is HTTP-cached for now — `Cache-Control: no-store` throughout.
+Still to be placed: translation and notification dispatch.
 
 ---
 
@@ -1241,13 +1373,13 @@ on the client as well as in the schema.
 - `CameraCapture` — `<input type="file" accept="image/*" capture="environment">`. Note
   `capture` is a *hint*: users can still pick from the library and desktop ignores it, so
   offer both a camera and a file input rather than relying on UA behaviour.
-- `CornerCropper` — manual four-corner perspective correction, clamped per §4.5.
+- `CornerCropper` — manual four-corner placement on a screen-sized preview; sends normalised corners, the server warps (§4.5).
 - `BatchUploadForm` — multi-file select with **shared metadata** (place, rough date, tags
   set once) then per-item correction. Without this, digitising 300 Feuerwehr photos one at
   a time is where the seed corpus quietly dies. Same components as the phone flow, denser
   layout.
 - `RoughDateInput` — granularity selector (Tag / Monat / Jahr / Jahrzehnt) leading with
-  decade buttons, plus a "Zeitraum" toggle for the second endpoint. Rejects overlapping
+  decade buttons — 1900er to 1990er, plus "früher…" opening the 1800s and before — plus a "Zeitraum" toggle for the second endpoint. Rejects overlapping
   boundaries at entry with an explanation, rather than letting the database refuse it.
 
 **Moderation**
@@ -1257,6 +1389,9 @@ on the client as well as in the schema.
   publish/remove and "publish all".
 - `DanglingChipRepair` — fix references broken by a rejected or merged target.
 - `StaleProposalWarning` — when `based_on_version` is behind the head.
+- `ProbablyDeceasedList` — people with no death date whose birth span ended more than
+  100 years ago: a worklist for recording deaths **by hand**, never an automatic rule
+  (§4.4).
 
 **Search**
 - `CommandPalette` (Cmd+K) over all published entities, plus per-type search on the
@@ -1299,12 +1434,12 @@ not after. A German site publishing photographs of identifiable people has real 
 
 ## 8. Sequence
 
-1. **Groundwork** — Compose stack, custom Postgres image, Garage, Drizzle, one persisted
+1. **Groundwork** — Compose stack, custom Postgres image, SeaweedFS, Drizzle, one persisted
    route end to end.
 2. **Domain core** — entity hierarchy, versions, proposals, closure invariant, localized
    content, rough dates. The hardest part, and everything else assumes it.
-3. **Auth** — better-auth, magic link, `emailVerified` + `approved`, roles.
-4. **Upload** — camera and file, crop/deskew, client derivatives, batch metadata.
+3. **Auth** — better-auth, magic link, roles (`member` on verification, `approved` by an admin).
+4. **Upload** — camera and file, corner placement, server-side ingest and derivatives, batch metadata.
 5. **Moderation** — queue, diff, dependencies. *Nothing can go public before this exists.*
 6. **Map + timeline** — pins, areas, viewport loading, time filter, upload-by-tap.
 7. **Content editing** — TipTap, directive serializer, link extraction, backlinks.
@@ -1339,7 +1474,7 @@ not after. A German site publishing photographs of identifiable people has real 
   prerendering or edge-injected per-route meta.
 - **Legal review (?)** — who, and when. Before the first public upload.
 - **Ancestry detail** — pedigree layout (`d3-hierarchy`) is sketched; a general
-  relationship graph is not. Living-person restriction rules need writing down.
+  relationship graph is not. Living-person rules are in §4.4.
 - **Auto edge detection (?)** — deferred; OpenCV.js payload.
 - **Verify before committing money** — current VPS and object-storage pricing, and whether
   DeepL's API Free tier still exists.
@@ -1348,3 +1483,77 @@ not after. A German site publishing photographs of identifiable people has real 
 
 SSR, real-time collaboration, DNA/matching, native mobile apps, a plugin system, branching
 version histories, a general ABAC engine. None ruled out; none belong in v1.
+
+## 11. Open design questions from implementation
+
+Raised while building step 2, and left open rather than settled by whichever way the code
+happened to go. Marked **(?)** like §9. The first two are **live defects in committed
+code**, not just gaps.
+
+- **Tag slug uniqueness across versions** — *decided and fixed.* `tag_slug_unique`
+  makes `slug` unique across every published row, so a tag's second version collides with
+  its first and **a tag can only ever be published once**. Settled by dropping the slug:
+  tags are addressed by id like every other entity (§5.2), so the column and its index go.
+
+- **Entity chip syntax** — *decided:* `:entity{#<uuid>}`, the id and nothing else. No
+  stored label: the chip renders the entity's current name in the reader's language, or a
+  placeholder when the reader may not preview it, so a name can neither go stale nor leak
+  (§4.6). No type: `GET /entities/:id` resolves it. The cost is search — a body no longer
+  contains the names it mentions. Decided: **search through the links** — the link set
+  *is* the chips in the bodies (§2.6), so a search matches an entity whose body matches
+  the query **or** which links to an entity whose name matches and that the actor may
+  preview. The second half goes through the ordinary scoping predicates, so it is correct
+  per reader, and names are read live, so there is nothing to invalidate. A rendered-text
+  cache was rejected: one copy cannot vary by reader, and one per reader multiplies the
+  corpus. The cost: ranking and `ts_headline` see only the body, so a match through a name
+  is ranked separately and not highlighted.
+
+- **Permission vocabulary and default grants** — *decided* (§4.4): `<scope>:<action>`
+  with `preview`/`view`/`propose`/`moderate` per type plus `comment:*`,
+  `account:approve`, `role:manage` and `version:redact`; roles public, `member`,
+  `approved`, `moderator`, `admin`; `approved` and `member` are role grants, and the
+  `user.approved` column is gone.
+
+- **better-auth and the `user` entity** — *decided: its tables beside ours.* better-auth
+  owns `auth_user`, `session`, `account`, `verification` and the authentication facts
+  (email, `emailVerified`); our `user` entity owns identity and links to it by a unique
+  `auth_user_id`. Mapping better-auth onto our table was rejected: its insert cannot create
+  the `entity` row the foreign key needs without a trigger or hook writing outside the
+  domain, and every upgrade could break a domain table. `identify(request)` is the one
+  seam — session → `auth_user_id` → `user` → actor. better-auth's `after` hook runs *after*
+  its transaction commits, so signup is two steps: account creation is an idempotent
+  `ensureAccount`, called from the hook **and** from `identify`, so a half-created account
+  repairs itself rather than staying broken. The same hook grants `member` on first
+  verification (§4.4).
+
+- **Email provider and `notification_outbox`** — *decided.*
+  - **Mail is plain SMTP**, configured by an admin in the running app — no provider SDK,
+    the sender is whatever SMTP server the operator points it at. Development runs a mail
+    catcher (Mailpit) in `compose.dev.yml`.
+  - **Everything goes through the outbox, magic links included.** The row is written in
+    the transaction that causes the mail, so a mail goes out only if that committed;
+    retries and a record of what was sent follow. A dispatcher inside the server is
+    woken right after commit — a login link must not wait for a poll — and a periodic
+    poll catches what was missed; rows are claimed with `FOR UPDATE SKIP LOCKED`, so
+    several instances never send twice. Magic links sit in the outbox in plain text,
+    accepted because they expire within minutes.
+  - **Settings and secrets.** Admin-edited configuration lives in the database;
+    deployment facts (connection strings, ports, the text-search configuration) stay in
+    env. `setting` holds plain values; `secret` holds values encrypted with AES-256-GCM
+    (WebCrypto) under **`SECRETS_KEY`**, the one secret that must stay in env because it
+    unlocks the rest. Both are reached only through `settings.get/set` and
+    `secrets.get/set(name, value, actor)`, audited like every other row. The admin UI
+    is **write-only for secrets** — "set on …, by …" and a replace field, never the
+    value. Losing `SECRETS_KEY` loses the secrets and nothing else; an admin re-enters
+    them. Gated by `setting:manage` (§4.4).
+
+- **Upload derivatives** — *decided* (§4.5): made on the server with `sharp`, WebP,
+  `web` at 2000 px and `thumb` at 400 px on the long edge; quality tuned on real scans.
+  Still to verify: `sharp` under Bun, and HEIC from iPhones.
+
+- **`RoughDateInput` decade buttons** — *decided* (§6): 1900er–1990er, plus "früher…".
+
+- **Living-person gating rules** — *decided* (§4.4): living unless a death is recorded,
+  with or without its date; the preview of a living person is the name only; a moderator worklist
+  surfaces people born over 100 years ago with no death date, to be resolved by hand.
+

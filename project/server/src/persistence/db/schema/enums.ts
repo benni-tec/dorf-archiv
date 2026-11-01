@@ -46,3 +46,26 @@ export const proposalStatus = pgEnum("proposal_status", [
 	"accepted",
 	"rejected",
 ]);
+
+/**
+ * The role a file plays in a Media entity (PLAN.md §5.2).
+ *
+ * `original` is the untouched upload and is never regenerated; the others are derivatives
+ * that can be rebuilt from it, which is what makes a format migration possible without
+ * asking contributors for their photographs again.
+ */
+export const mediaFileRole = pgEnum("media_file_role", [
+	"original",
+	"web",
+	"thumb",
+]);
+
+/**
+ * Whether a comment is visible. Per comment rather than per thread (PLAN.md §2.8) — one bad
+ * reply should not hide a useful conversation.
+ */
+export const moderationStatus = pgEnum("moderation_status", [
+	"pending",
+	"approved",
+	"rejected",
+]);

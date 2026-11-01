@@ -5,3 +5,6 @@
 Dockerfile        text eol=lf
 project/postgres/**       text eol=lf
 project/server/Dockerfile text eol=lf
+
+# Drizzle regenerates a full schema snapshot per migration; nobody reviews these by hand.
+project/server/drizzle/meta/*.json linguist-generated=true
